@@ -10,6 +10,17 @@ YoloBoxCoords = List[float]  # [x_center, y_center, width, height]
 YoloBoxDict = Dict[str, Union[int, YoloBoxCoords]]
 
 
+def absolute_to_yolo(abs_box: AbsoluteBox, img_width: int, img_height: int) -> YoloBoxCoords:
+        """Convert absolute box [x1, y1, w, h] to YOLO format"""
+        x1, y1, w, h = abs_box
+        
+        x_center = (x1 + w/2) / img_width
+        y_center = (y1 + h/2) / img_height
+        width = w / img_width
+        height = h / img_height
+        
+        return [x_center, y_center, width, height]
+
 
 def read_yolo_label(label_path:str) -> List[YoloBoxDict] :
         """Read YOLO format label file"""
@@ -67,16 +78,7 @@ def calculate_iou(box1: AbsoluteBox, box2 : AbsoluteBox) -> float:
         
         return iou
 
-def absolute_to_yolo(abs_box: AbsoluteBox, img_width: int, img_height: int) -> YoloBoxCoords:
-        """Convert absolute box [x1, y1, w, h] to YOLO format"""
-        x1, y1, w, h = abs_box
-        
-        x_center = (x1 + w/2) / img_width
-        y_center = (y1 + h/2) / img_height
-        width = w / img_width
-        height = h / img_height
-        
-        return [x_center, y_center, width, height]
+
 
 def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, tracking_results = None):
         

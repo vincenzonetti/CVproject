@@ -1,4 +1,10 @@
 tracking_results/
+out2/
+dataset/
+camera_data/
+rectified_frames
+rectified_videos
+.vscode
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
