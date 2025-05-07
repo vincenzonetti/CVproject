@@ -80,7 +80,7 @@ def calculate_iou(box1: AbsoluteBox, box2 : AbsoluteBox) -> float:
 
 
 
-def evaluate_tracking(iou_threshold=0.1,image_paths = None, label_paths = None, tracking_results = None):
+def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, tracking_results = None):
         
         """Evaluate tracking performance on annotated frames"""
         assert image_paths is not None and label_paths is not None and tracking_results is not None
