@@ -80,7 +80,7 @@ def calculate_iou(box1: AbsoluteBox, box2 : AbsoluteBox) -> float:
 
 
 
-def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, tracking_results = None):
+def evaluate_tracking(iou_threshold=0.1,image_paths = None, label_paths = None, tracking_results = None):
         
         """Evaluate tracking performance on annotated frames"""
         assert image_paths is not None and label_paths is not None and tracking_results is not None
@@ -107,27 +107,24 @@ def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, 
             label_path = label_paths[frame_idx]
             gt_boxes = read_yolo_label(label_path)
             # Convert to absolute coordinates
-            gt_abs_boxes = [yolo_to_absolute(box['bbox'], width, height) for box in gt_boxes]
+            gt_abs_boxes = [(yolo_to_absolute(box['bbox'], width, height),box['class_id']) for box in gt_boxes]
             
             # Get tracked boxes
             tracked_boxes = tracking_results.get(frame_idx, [])
-            tracked_abs_boxes = [yolo_to_absolute(box['bbox'], width, height) for box in tracked_boxes]
-
+            tracked_abs_boxes = [(yolo_to_absolute(box['bbox'], width, height),box['class_id']) for box in tracked_boxes]
             # Calculate IoU between each GT box and tracked box
             matches = []
             for i, gt_box in enumerate(gt_abs_boxes):
                 best_iou = 0
-                best_match = -1
                 for j, tracked_box in enumerate(tracked_abs_boxes):
-                    iou = calculate_iou(gt_box, tracked_box)
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_match = j
-
+                    if gt_box[1] == tracked_box[1]:
+                        best_iou = calculate_iou(gt_box[0], tracked_box[0])
+                
                 if best_iou >= iou_threshold:
-                    matches.append((i, best_match, best_iou))
-                    total_iou += best_iou
-                    total_detections += 1
+                    matches.append((gt_box[1],best_iou))
+                   
+                total_iou += best_iou
+                total_detections += 1
 
 
             # Calculate TP, FP, FN

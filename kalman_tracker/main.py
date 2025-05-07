@@ -97,7 +97,7 @@ class PlayerTracker:
 # Main execution
 if __name__ == "__main__":
     # Define the path to the configuration file
-    config_path = "../out2/data.yaml"
+    config_path = "../dataset/data.yaml"
 
     # Create the tracker
     tracker = PlayerTracker(config_path)
