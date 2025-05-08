@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 import glob
 from utils import *
-from KalmanTracker import ExtendedKalman
+from ExtendedKalman import ExtendedKalman
 
 class PlayerTracker:
     def __init__(self, config_path):
