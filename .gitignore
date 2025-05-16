@@ -3,6 +3,7 @@ tracking_results/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pt
 data/
 # C extensions
 *.so
