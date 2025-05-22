@@ -78,10 +78,10 @@ def absolute_to_yolo(abs_box: AbsoluteBox, img_width: int, img_height: int) -> Y
         
         return [x_center, y_center, width, height]
 
-def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, tracking_results = None):
+def evaluate_tracking(iou_threshold=0.5, ground_truth_boxes = None, tracking_results = None):
         
         """Evaluate tracking performance on annotated frames"""
-        assert image_paths is not None and label_paths is not None and tracking_results is not None
+        assert ground_truth_boxes is not None and tracking_results is not None
         metrics = {
             'mAP': 0.0,
             'precision': 0.0,
@@ -96,42 +96,34 @@ def evaluate_tracking(iou_threshold=0.5,image_paths = None, label_paths = None, 
         total_iou = 0.0
         total_detections = 0
 
-        for frame_idx in range(len(image_paths)):
-            img_path = image_paths[frame_idx]
-            img = cv2.imread(img_path)
-            height, width = img.shape[:2]
-
+        for frame_idx in range(len(ground_truth_boxes)):
+            
             # Get ground truth
-            label_path = label_paths[frame_idx]
-            gt_boxes = read_yolo_label(label_path)
-            # Convert to absolute coordinates
-            gt_abs_boxes = [yolo_to_absolute(box['bbox'], width, height) for box in gt_boxes]
+            gt_boxes = ground_truth_boxes[frame_idx]
             
             # Get tracked boxes
             tracked_boxes = tracking_results.get(frame_idx, [])
-            tracked_abs_boxes = [yolo_to_absolute(box['bbox'], width, height) for box in tracked_boxes]
-
+            
             # Calculate IoU between each GT box and tracked box
             matches = []
-            for i, gt_box in enumerate(gt_abs_boxes):
+            for i, gt_box in enumerate(gt_boxes):
                 best_iou = 0
-                best_match = -1
-                for j, tracked_box in enumerate(tracked_abs_boxes):
-                    iou = calculate_iou(gt_box, tracked_box)
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_match = j
-
+                for j, tracked_box in enumerate(tracked_boxes):
+                    
+                    if gt_box['class_id'] == tracked_box['class_id']:
+                        best_iou = calculate_iou(gt_box['bbox'], tracked_box['bbox'])
+                        
                 if best_iou >= iou_threshold:
-                    matches.append((i, best_match, best_iou))
-                    total_iou += best_iou
-                    total_detections += 1
+                    matches.append((gt_box['class_id'],best_iou))
+                   
+                total_iou += best_iou
+                total_detections += 1
 
 
             # Calculate TP, FP, FN
             tp = len(matches)
-            fp = len(tracked_abs_boxes) - tp
-            fn = len(gt_abs_boxes) - tp
+            fp = len(tracked_boxes) - tp
+            fn = len(gt_boxes) - tp
 
             total_tp += tp
             total_fp += fp
