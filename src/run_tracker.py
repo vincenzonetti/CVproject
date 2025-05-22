@@ -5,16 +5,15 @@ import cv2
 from ultralytics import YOLO
 
 
-def run_tracker(model_path: str, video_path: str, tracker_path: str):
+def run_tracker(model_path: str, video_path: str):
     model = YOLO(model_path)
     cap = cv2.VideoCapture(video_path)
 
-    # Extract names for output folder
+    # Extract video name for output and frame keys
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     model_name = os.path.splitext(os.path.basename(model_path))[0]
-    tracker_name = os.path.splitext(os.path.basename(tracker_path))[0]
 
-    output_dir = os.path.join("outputs", f"{video_name}_{model_name}_{tracker_name}")
+    output_dir = os.path.join("outputs", f"{video_name}_{model_name}_classid")
     os.makedirs(output_dir, exist_ok=True)
 
     json_output_path = os.path.join(output_dir, "tracking_results.json")
@@ -35,36 +34,46 @@ def run_tracker(model_path: str, video_path: str, tracker_path: str):
         if not ret:
             break
 
-        results = model.track(frame, persist=True, tracker=tracker_path)
+        results = model(frame)[0]
         detections = []
 
-        if results[0].boxes is not None:
-            boxes = results[0].boxes
+        if results.boxes is not None:
+            boxes = results.boxes
+            best_by_class = {}
+
             for i in range(len(boxes)):
                 cls_id = int(boxes.cls[i].item())
+                conf = float(boxes.conf[i].item())
                 x_center, y_center, w, h = boxes.xywh[i].tolist()
                 img_h, img_w = frame.shape[:2]
 
-                # Append detection
-                detections.append({
-                    'class_id': cls_id,
-                    'bbox': [
-                        x_center / img_w,
-                        y_center / img_h,
-                        w / img_w,
-                        h / img_h
-                    ]
-                })
+                if cls_id not in best_by_class or conf > best_by_class[cls_id]['conf']:
+                    best_by_class[cls_id] = {
+                        'class_id': cls_id,
+                        'track_id': cls_id,  # Same as class ID
+                        'bbox': [
+                            x_center / img_w,
+                            y_center / img_h,
+                            w / img_w,
+                            h / img_h
+                        ],
+                        'conf': conf
+                    }
+
+            for det in best_by_class.values():
+                detections.append(det)
 
                 # Draw box on frame
-                x1 = int(x_center - w / 2)
-                y1 = int(y_center - h / 2)
-                x2 = int(x_center + w / 2)
-                y2 = int(y_center + h / 2)
+                xc, yc, bw, bh = det['bbox']
+                x1 = int((xc - bw / 2) * img_w)
+                y1 = int((yc - bh / 2) * img_h)
+                x2 = int((xc + bw / 2) * img_w)
+                y2 = int((yc + bh / 2) * img_h)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"{cls_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                cv2.putText(frame, f"ID {det['track_id']}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-        tracking_results[frame_idx] = detections
+        frame_key = f"{video_name}_{frame_idx}"
+        tracking_results[frame_key] = detections
         frame_idx += 1
 
         out_video.write(frame)
@@ -80,10 +89,9 @@ def run_tracker(model_path: str, video_path: str, tracker_path: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run YOLO tracking on a video.")
+    parser = argparse.ArgumentParser(description="Run YOLO class-ID-based tracking on a video.")
     parser.add_argument("--model", type=str, required=True, help="Path to the YOLO model")
     parser.add_argument("--video", type=str, required=True, help="Path to the input video")
-    parser.add_argument("--tracker", type=str, default="botsort.yaml", help="Path to tracker config (e.g. botsort.yaml)")
     args = parser.parse_args()
 
-    run_tracker(args.model, args.video, args.tracker)
+    run_tracker(args.model, args.video)
