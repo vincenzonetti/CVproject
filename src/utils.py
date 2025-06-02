@@ -4,11 +4,25 @@ from scipy.optimize import linear_sum_assignment
 from typing import List, Dict, Union, Tuple
 import cv2
 from tqdm import tqdm
+import glob
+from dataclasses import dataclass
 AbsoluteBox = List[int]  # [x1, y1, w, h]
 YoloBoxCoords = List[float]  # [x_center, y_center, width, height]
 # Define a type alias for a YOLO bounding box dictionary
 YoloBoxDict = Dict[str, Union[int, YoloBoxCoords]]
 
+
+
+@dataclass
+class BallTemplate:
+    """Stores ball template information for matching"""
+    image: np.ndarray
+    histogram: np.ndarray
+    keypoints: List[cv2.KeyPoint]
+    descriptors: np.ndarray
+    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
+    confidence: float
+    frame_idx: int
 
 
 def read_yolo_label(label_path:str) -> List[YoloBoxDict] :
@@ -193,3 +207,60 @@ def visualize_tracking(output_dir='tracking_results',image_paths = None, trackin
             cv2.imwrite(output_path, img)
 
         print(f"Saved visualization to {output_dir}/")
+
+
+def histogram_uniformity(hist):
+    # Calculate the variance of the histogram as a measure of uniformity
+    return np.var(hist)
+
+def get_ball_templates(label_dir, image_dir, video_name):
+    label_files = sorted(glob.glob(f'{label_dir}/{video_name}*.txt'))
+    image_files = sorted(glob.glob(f'{image_dir}/{video_name}*.jpg'))
+    orb = cv2.ORB_create(nfeatures=500, scaleFactor=1.2, nlevels=8)
+
+    best_template = None
+
+    for i, file in enumerate(label_files):
+        lbls = read_yolo_label(file)
+        lbls = {item['class_id']: item['bbox'] for item in lbls}
+
+        if 0 in lbls:
+            x_center, y_center, width, height = lbls[0]
+            frame = cv2.imread(image_files[i], cv2.IMREAD_COLOR)
+            img_h, img_w = frame.shape[:2]
+
+            x = int((x_center - width / 2) * img_w)
+            y = int((y_center - height / 2) * img_h)
+            w = int(width * img_w)
+            h = int(height * img_h)
+
+            ball_roi = frame[y:y+h, x:x+w]
+
+            hsv_roi = cv2.cvtColor(ball_roi, cv2.COLOR_BGR2HSV)
+            hist = cv2.calcHist([hsv_roi], [0, 1, 2], None, [50, 60, 60], [0, 180, 0, 256, 0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+
+            gray_roi = cv2.cvtColor(ball_roi, cv2.COLOR_BGR2GRAY)
+            keypoints, descriptors = orb.detectAndCompute(gray_roi, None)
+
+           
+            current_uniformity = histogram_uniformity(hist)
+
+            if best_template is None or current_uniformity < histogram_uniformity(best_template.histogram):
+                #cv2.imshow('Window', ball_roi)
+                #cv2.waitKey(0)
+                #cv2.destroyAllWindows()
+
+                best_template = BallTemplate(
+                    image=ball_roi.copy(),
+                    histogram=hist,
+                    keypoints=keypoints,
+                    descriptors=descriptors,
+                    bbox=(x_center*img_w, y_center*img_h, w, h),
+                    confidence=1.0,
+                    frame_idx=i
+                )
+
+    
+        return best_template
+            
