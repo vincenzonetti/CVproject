@@ -6,6 +6,7 @@ import numpy as np
 from ultralytics import YOLO
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from datetime import datetime
 
 class StereoTracker:
     def __init__(self, model_path, video1_path, video2_path, cam1_params_path, cam2_params_path):
@@ -200,7 +201,6 @@ class StereoTracker:
             
             # Match objects between views
             matches = self.match_objects(detections1, detections2)
-            
             # Triangulate 3D positions
             frame_3d = {}
             for obj_name, match in matches.items():
@@ -319,9 +319,10 @@ class StereoTracker:
         ax.set_title('3D Object Trajectories')
         ax.legend()
         
+        current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"3D visualization saved to {save_path}")
+            print(f"3D visualization saved to {save_path}_{current_timestamp}")
         
         plt.show()
 
