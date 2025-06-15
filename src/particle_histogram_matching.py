@@ -304,10 +304,17 @@ def calculate_histogram(image, channel_name, color):
     return hist_smooth
 
 
+def load_histograms(file_path):
+    with open(file_path, 'r') as json_file:
+        histograms = json.load(json_file)
+    return histograms
+
 def run_tracker(model_path: str, video_path: str):
     model = YOLO(model_path)
     cap = cv2.VideoCapture(video_path)
 
+    histograms = load_histograms('out13_histograms.json')
+    
     # Extract video name for output and frame keys
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     model_name = os.path.splitext(os.path.basename(model_path))[0]
@@ -461,13 +468,11 @@ def run_tracker(model_path: str, video_path: str):
                     # Add detection to results
                     pf_x = estimate['x'] / img_w
                     pf_y = estimate['y'] / img_h
-                    pf_w = estimate['width'] / img_w
-                    pf_h = estimate['height'] / img_h
-                    
+                    pf_w,pf_h = particle_filter.ball_size
                     pf_detection = {
                         'class_id': 0,
                         'track_id': 0,
-                        'bbox': [pf_x, pf_y, pf_w, pf_h],
+                        'bbox': [pf_x, pf_y],
                         'conf': min(0.9, estimate['confidence']),
                         'source': detection_source
                     }
@@ -494,6 +499,13 @@ def run_tracker(model_path: str, video_path: str):
 
         frame_key = f"{video_name}_{frame_idx}"
         tracking_results[frame_key] = detections
+        if frame_idx % 5 == 0:
+            particle_filter.reference_histogram={
+                'red': histograms[frame_idx//5]['red'],
+                'green': histograms[frame_idx//5]['green'],
+                'blue': histograms[frame_idx//5]['blue']
+            }
+            
         frame_idx += 1
 
         out_video.write(frame)

@@ -264,3 +264,15 @@ def get_ball_templates(label_dir, image_dir, video_name):
     
         return best_template
             
+                 
+def read_yolo_label_mod(label_path:str) -> Dict[int,YoloBoxCoords] :
+        """Read YOLO format label file"""
+        boxes = {}
+        if os.path.exists(label_path):
+            with open(label_path, 'r') as f:
+                for line in f:
+                    data = line.strip().split()
+                    class_id = int(data[0])
+                    x_center, y_center, width, height = map(float, data[1:5])
+                    boxes[class_id]=[x_center, y_center, width, height]
+        return boxes
