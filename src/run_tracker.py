@@ -3,7 +3,7 @@ import os
 import json
 import cv2
 from ultralytics import YOLO
-
+from tqdm import tqdm
 
 def run_tracker(model_path: str, video_path: str):
     model = YOLO(model_path)
@@ -28,13 +28,16 @@ def run_tracker(model_path: str, video_path: str):
 
     tracking_results = {}
     frame_idx = 0
+    length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    pbar = tqdm(total=length)
 
     while cap.isOpened():
+        pbar.update(1)
         ret, frame = cap.read()
         if not ret:
             break
 
-        results = model(frame)[0]
+        results = model(frame,verbose=False)[0]
         detections = []
 
         if results.boxes is not None:
@@ -79,6 +82,7 @@ def run_tracker(model_path: str, video_path: str):
         out_video.write(frame)
 
     cap.release()
+    pbar.close()
     out_video.release()
 
     with open(json_output_path, "w") as f:
