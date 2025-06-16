@@ -33,6 +33,32 @@ class CSRTBallTracker:
         # Create new CSRT tracker
         self.tracker = cv2.TrackerCSRT_create()
         
+        # Expand bbox if it's too small (minimum 20x20 pixels)
+        x, y, w, h = bbox
+        min_size = 20
+        
+        if w < min_size or h < min_size:
+            # Calculate expansion needed
+            expand_w = max(0, (min_size - w) // 2)
+            expand_h = max(0, (min_size - h) // 2)
+            
+            # Expand bbox while keeping it within frame bounds
+            new_x = max(0, x - expand_w)
+            new_y = max(0, y - expand_h)
+            new_w = min(self.img_width - new_x, w + 2 * expand_w)
+            new_h = min(self.img_height - new_y, h + 2 * expand_h)
+            
+            expanded_bbox = (new_x, new_y, new_w, new_h)
+            print(f"Expanding small bbox from {bbox} to {expanded_bbox}")
+            bbox = expanded_bbox
+        
+        # Validate bbox dimensions and position
+        x, y, w, h = bbox
+        if (x < 0 or y < 0 or x + w > self.img_width or y + h > self.img_height or w <= 0 or h <= 0):
+            print(f"Invalid bbox for CSRT initialization: {bbox} (frame size: {self.img_width}x{self.img_height})")
+            self.initialized = False
+            return False
+        
         # Initialize tracker with the frame and bounding box
         success = self.tracker.init(frame, bbox)
         
@@ -42,9 +68,10 @@ class CSRTBallTracker:
             self.last_bbox = bbox
             # Store center position for search window
             self.last_ball_position = (bbox[0] + bbox[2]/2, bbox[1] + bbox[3]/2)
-            print(f"CSRT tracker initialized with bbox: {bbox}")
+            print(f"CSRT tracker initialized successfully with bbox: {bbox}")
         else:
-            print("Failed to initialize CSRT tracker")
+            print(f"Failed to initialize CSRT tracker with bbox: {bbox}")
+            print(f"Frame shape: {frame.shape}, bbox area: {w*h}")
             self.initialized = False
         
         return success

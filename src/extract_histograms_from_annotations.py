@@ -60,6 +60,8 @@ def main():
                 'blue': hist_b
             }
             histograms.append(reference_histogram)
+        else:
+            histograms.append({})
 
     # Save histograms to a JSON file
     with open('histograms.json', 'w') as json_file:

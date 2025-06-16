@@ -15,7 +15,7 @@ from scipy.stats import skew, kurtosis, entropy
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=500, img_width=640, img_height=480):
+    def __init__(self, num_particles=1500, img_width=640, img_height=480):
         self.num_particles = num_particles
         self.img_width = img_width
         self.img_height = img_height
@@ -499,7 +499,7 @@ def run_tracker(model_path: str, video_path: str):
 
         frame_key = f"{video_name}_{frame_idx}"
         tracking_results[frame_key] = detections
-        if frame_idx % 5 == 0:
+        if frame_idx % 5 == 0 and 'red' in histograms[frame_idx//5]:
             particle_filter.reference_histogram={
                 'red': histograms[frame_idx//5]['red'],
                 'green': histograms[frame_idx//5]['green'],
