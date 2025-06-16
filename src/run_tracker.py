@@ -33,7 +33,9 @@ def run_tracker(model_path: str, video_path: str):
 
     while cap.isOpened():
         pbar.update(1)
+        
         ret, frame = cap.read()
+        breakpoint()
         if not ret:
             break
 
