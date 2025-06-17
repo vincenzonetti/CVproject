@@ -101,7 +101,7 @@ class KalmanFilter:
 
 
 class OpticalFlowTracker:
-    """Optical flow tracker for dense motion estimation"""
+    """Optical flow tracker with prediction for out-of-view objects."""
     def __init__(self):
         # Lucas-Kanade parameters
         self.lk_params = dict(
@@ -112,66 +112,86 @@ class OpticalFlowTracker:
         
         self.prev_gray = None
         self.tracking_points = None
+        # **NEW**: Store the last known velocity to predict position when tracking is lost.
+        self.last_known_velocity = np.array([0.0, 0.0])
         
     def initialize(self, frame, center_x, center_y, roi_size=30):
-        """Initialize optical flow tracking around detection"""
+        """Initialize optical flow tracking around a detection."""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Create grid of points around the ball
         x1 = max(0, int(center_x - roi_size/2))
         y1 = max(0, int(center_y - roi_size/2))
         x2 = min(frame.shape[1], int(center_x + roi_size/2))
         y2 = min(frame.shape[0], int(center_y + roi_size/2))
         
-        # Feature detection in ROI
         roi = gray[y1:y2, x1:x2]
         corners = cv2.goodFeaturesToTrack(roi, maxCorners=20, qualityLevel=0.01, minDistance=5)
         
-        if corners is not None:
-            # Convert to global coordinates
+        if corners is not None and len(corners) > 0:
             corners[:, :, 0] += x1
             corners[:, :, 1] += y1
             self.tracking_points = corners
         else:
-            # Fallback: create manual grid
             self.tracking_points = np.array([[[center_x, center_y]]], dtype=np.float32)
             
         self.prev_gray = gray
+        # **NEW**: Reset velocity on re-initialization.
+        self.last_known_velocity = np.array([0.0, 0.0])
         
     def track(self, frame):
-        """Track points using optical flow"""
-        if self.prev_gray is None or self.tracking_points is None:
+        """
+        Track points using optical flow.
+        If points are lost (e.g., ball out of frame), predict the new position
+        based on the last known velocity.
+        """
+        if self.prev_gray is None or self.tracking_points is None or len(self.tracking_points) == 0:
             return None
             
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Calculate optical flow
         next_points, status, error = cv2.calcOpticalFlowPyrLK(
             self.prev_gray, gray, self.tracking_points, None, **self.lk_params
         )
         
-        # Filter good points
-        good_points = next_points[status == 1]
-        
-        if len(good_points) > 0:
+        good_new_points = next_points[status == 1] if next_points is not None else np.array([])
+        good_old_points = self.tracking_points[status == 1]
+
+        # **MODIFIED**: Check for a sufficient number of tracked points.
+        if len(good_new_points) > 5:
+            # --- Successful Track ---
+            # **NEW**: Calculate and store the current velocity.
+            self.last_known_velocity = np.mean(good_new_points - good_old_points, axis=0)
+            
             # Calculate centroid of tracked points
-            center_x = np.mean(good_points[:, 0])
-            center_y = np.mean(good_points[:, 1])
+            center_x = np.mean(good_new_points[:, 0])
+            center_y = np.mean(good_new_points[:, 1])
             
-            # Update tracking points
-            self.tracking_points = next_points[status == 1].reshape(-1, 1, 2)
-            
-            # Remove points that are too far from centroid (outlier removal)
-            distances = np.sqrt((self.tracking_points[:, 0, 0] - center_x)**2 + 
-                              (self.tracking_points[:, 0, 1] - center_y)**2)
-            good_indices = distances < 20  # threshold
-            self.tracking_points = self.tracking_points[good_indices]
+            # Update tracking points for the next frame
+            self.tracking_points = good_new_points.reshape(-1, 1, 2)
             
             self.prev_gray = gray
             return (center_x, center_y)
-        
-        self.prev_gray = gray
-        return None
+        else:
+            # --- Track Lost / Ball Out of View ---
+            # **NEW**: Predict the position using the last known velocity.
+            
+            # Get the centroid of the last known point cloud
+            last_centroid = np.mean(self.tracking_points, axis=0).flatten()
+            
+            # Apply damping to simulate friction/air resistance
+            self.last_known_velocity *= 0.98 
+            
+            # Predict the new position
+            predicted_position = last_centroid + self.last_known_velocity
+            
+            # Update the tracking points to the predicted location for the next frame
+            if self.tracking_points is not None:
+                self.tracking_points = (self.tracking_points.reshape(-1, 2) + self.last_known_velocity).reshape(-1, 1, 2)
+            
+            self.prev_gray = gray
+            
+            # Return the predicted position, which may be outside the frame
+            return (predicted_position[0], predicted_position[1])
 
 
 class MultiHypothesisTracker:
