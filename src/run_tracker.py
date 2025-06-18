@@ -61,8 +61,15 @@ def run_tracker(model_path: str, video_path: str, tracker_path: str):
                 y1 = int(y_center - h / 2)
                 x2 = int(x_center + w / 2)
                 y2 = int(y_center + h / 2)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"{cls_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                track_id = int(boxes.id[i].item() if boxes.id[i] is not None else -1)
+                # Generate a color based on track_id
+                color = (
+                    (37 * track_id) % 256,
+                    (17 * track_id) % 256,
+                    (29 * track_id) % 256
+                )
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"ID: {track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
 
         tracking_results[frame_idx] = detections
         frame_idx += 1
