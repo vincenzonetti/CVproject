@@ -37,7 +37,6 @@ def run_tracker(model_path: str, video_path: str):
         pbar.update(1)
         
         ret, frame = cap.read()
-        breakpoint()
         if not ret:
             break
 
@@ -76,21 +75,11 @@ def run_tracker(model_path: str, video_path: str):
                 y1 = int((yc - bh / 2) * img_h)
                 x2 = int((xc + bw / 2) * img_w)
                 y2 = int((yc + bh / 2) * img_h)
-                # Assign a color based on track_id (class_id)
-                color = tuple(int(x) for x in cv2.cvtColor(
-                    np.uint8([[[det['track_id'] * 40 % 256, 255, 255]]]), cv2.COLOR_HSV2BGR
-                )[0, 0])
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(
-                    frame,
-                    f"ID {det['track_id']}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    color,
-                    2
-                )
-
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"ID {det['track_id']}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        #cv2.imshow('win',cv2.resize(frame,(1080,720)))
+        #cv2.waitKey(0)
+        #cv2.destroyAllWindows()
         frame_key = f"{video_name}_{frame_idx}"
         tracking_results[frame_key] = detections
         frame_idx += 1
