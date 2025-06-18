@@ -143,8 +143,6 @@ if __name__ == "__main__":
     parser.add_argument("--modelP", type=str, required=True, help="Path to the YOLO model for players")
     parser.add_argument("--modelB", type=str, required=True, help="Path to the YOLO model for the ball")
     parser.add_argument("--video", type=str, required=True, help="Path to the input video")
-    parser.add_argument("--trackerP", type=str, required=True, help="Path to the Tracker(yaml) config for the player")
-    parser.add_argument("--trackerB", type=str, required=True, help="Path to the Tracker(yaml) config for the ball")
     args = parser.parse_args()
 
     run_tracker(args.modelP,args.modelB, args.video)
