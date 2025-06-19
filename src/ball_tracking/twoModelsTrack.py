@@ -68,8 +68,7 @@ def run_tracker(model_path_players: str,model_path_ball: str, video_path: str,tr
             boxes = results.boxes
             for i in range(len(boxes)):
                 cls_id = int(boxes.cls[i].item())
-                if cls_id == 0:
-                    continue
+                cls_id+=1
                 conf = float(boxes.conf[i].item())
                 x_center, y_center, w, h = boxes.xywh[i].tolist()
                 img_h, img_w = frame.shape[:2]
