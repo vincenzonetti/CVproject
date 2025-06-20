@@ -15,19 +15,50 @@ def load_calibration(calib_path):
     return mtx, dist
 
 def rectify_bbox(bbox, mtx, dist):
-    x, y, w, h = bbox
-    pt1 = np.array([[(x * IMG_WIDTH, y * IMG_HEIGHT)]], dtype=np.float32)
-    pt2 = np.array([[((x + w) * IMG_WIDTH, (y + h) * IMG_HEIGHT)]], dtype=np.float32)
-
-    undistorted = cv2.undistortPoints(np.concatenate([pt1, pt2]), mtx, dist, P=mtx)
-    pt1_u, pt2_u = undistorted[0][0], undistorted[1][0]
-
-    x_u = float(pt1_u[0] / IMG_WIDTH)
-    y_u = float(pt1_u[1] / IMG_HEIGHT)
-    w_u = float((pt2_u[0] - pt1_u[0]) / IMG_WIDTH)
-    h_u = float((pt2_u[1] - pt1_u[1]) / IMG_HEIGHT)
-
-    return [x_u, y_u, w_u, h_u]
+    """
+    Rectify bounding box by undistorting all 4 corners and finding new bbox
+    """
+    # Assuming bbox format is [x_center, y_center, width, height] in normalized coords
+    # Convert to pixel coordinates
+    x_center, y_center, width, height = bbox
+    x_center_px = x_center * IMG_WIDTH
+    y_center_px = y_center * IMG_HEIGHT
+    width_px = width * IMG_WIDTH
+    height_px = height * IMG_HEIGHT
+    
+    # Calculate all 4 corners
+    x1 = x_center_px - width_px / 2
+    y1 = y_center_px - height_px / 2
+    x2 = x_center_px + width_px / 2
+    y2 = y_center_px + height_px / 2
+    
+    # Define all 4 corners of the bounding box
+    corners = np.array([
+        [[x1, y1]],  # top-left
+        [[x2, y1]],  # top-right
+        [[x2, y2]],  # bottom-right
+        [[x1, y2]]   # bottom-left
+    ], dtype=np.float32)
+    
+    # Undistort all corners
+    undistorted_corners = cv2.undistortPoints(corners, mtx, dist, P=mtx)
+    
+    # Extract undistorted coordinates
+    undistorted_coords = undistorted_corners.reshape(-1, 2)
+    
+    # Find bounding box of undistorted corners
+    x_min = np.min(undistorted_coords[:, 0])
+    y_min = np.min(undistorted_coords[:, 1])
+    x_max = np.max(undistorted_coords[:, 0])
+    y_max = np.max(undistorted_coords[:, 1])
+    
+    # Convert back to normalized coordinates
+    x_center_u = (x_min + x_max) / 2 / IMG_WIDTH
+    y_center_u = (y_min + y_max) / 2 / IMG_HEIGHT
+    width_u = (x_max - x_min) / IMG_WIDTH
+    height_u = (y_max - y_min) / IMG_HEIGHT
+    
+    return [x_center_u, y_center_u, width_u, height_u]
 
 def process_tracking(tracking_path, calib_path):
     mtx, dist = load_calibration(calib_path)
