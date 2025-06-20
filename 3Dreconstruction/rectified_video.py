@@ -4,6 +4,7 @@ import json
 import os
 import glob
 import re
+import argparse
 
 def load_calibration(calib_path):
     # Load the camera calibration parameters from a JSON file.
@@ -55,8 +56,8 @@ def process_video(video_path, calib_path, output_path):
     out.release()
     print(f"Finished processing video: {video_path}")
 
-def main():
-    video_files = glob.glob("../data/videos/out*.mp4") # path to the video files
+def main(video_path,camera_path):
+    video_files = glob.glob(f"{video_path}/out*.mp4") # path to the video files
     output_dir = "rectified_videos" # folder path where to save the rectified videos
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -68,7 +69,7 @@ def main():
         if match:
             cam_index = match.group(1)
             
-            calib_path = os.path.join("camera_data","camera_data", f"cam_{cam_index}", "calib", "camera_calib.json")
+            calib_path = os.path.join(f"{camera_path}", f"cam_{cam_index}", "calib", "camera_calib.json")
         else:
             print("Could not extract camera index from filename:", video_path)
             continue
@@ -82,4 +83,8 @@ def main():
         process_video(video_path, calib_path, output_path)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Rectify videos")
+    parser.add_argument("--vp", type=str, required=True, help="Path to the YOLO model for players")
+    parser.add_argument("--cp", type=str, required=True, help="Path to the YOLO model for the ball")
+    args = parser.parse_args()
+    main(args.vp,args.cp)
