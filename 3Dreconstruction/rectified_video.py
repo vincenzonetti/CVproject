@@ -84,7 +84,7 @@ def main(video_path,camera_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Rectify videos")
-    parser.add_argument("--vp", type=str, required=True, help="Path to the YOLO model for players")
-    parser.add_argument("--cp", type=str, required=True, help="Path to the YOLO model for the ball")
+    parser.add_argument("--vp", type=str, required=True, help="Path to the video folder")
+    parser.add_argument("--cp", type=str, required=True, help="Path to the camera calib folder")
     args = parser.parse_args()
     main(args.vp,args.cp)
