@@ -57,7 +57,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
-
+src/
 # Translations
 *.mo
 *.pot
@@ -179,3 +179,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+outputs/
+rectified_videos/
+rectified_videos2/
