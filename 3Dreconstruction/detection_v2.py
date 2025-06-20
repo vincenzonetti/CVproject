@@ -1,5 +1,5 @@
-import argparse
 import os
+import argparse
 import json
 import cv2
 import numpy as np
@@ -15,9 +15,12 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+CLASSES = ['Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 'Refree_F', 'Refree_M', 
+           'White_13', 'White_16', 'White_25', 'White_27', 'White_34']
+
 IMG_WIDTH = 3840
 IMG_HEIGHT = 2160
-CLASSES =['Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 'Refree_F', 'Refree_M', 'White_13', 'White_16', 'White_25', 'White_27', 'White_34']
+
 colors = [
     (255, 0, 0),    # Red
     (0, 255, 0),    # Green
@@ -121,7 +124,7 @@ class StereoTracker:
             # Extract class_id and bbox
             for x in value:
                 class_id = x['class_id']
-                class_id = CLASSES[class_id]
+                class_name = CLASSES[class_id]  # Convert to class name
                 bbox = x['bbox']    
                 
                 # Convert normalized coordinates to pixel coordinates
@@ -129,8 +132,8 @@ class StereoTracker:
                 x_center_px = bbox[0] * IMG_WIDTH
                 y_center_px = bbox[1] * IMG_HEIGHT
                 
-                # Add the class_id and bbox to the nested dictionary
-                formatted_params[-1][class_id] = {
+                # Add the class_name and bbox to the nested dictionary
+                formatted_params[-1][class_name] = {
                     'bbox': bbox,
                     'center': [x_center_px, y_center_px]  # Now in pixel coordinates
                 }
@@ -180,7 +183,7 @@ class StereoTracker:
         
         return matches
     
-    def triangulate_point(self, pt1, pt2):
+    def triangulate_point(self, pt1, pt2, obj_name):
         """Triangulate 3D point from 2D correspondences and transform to court coordinates"""
         # Convert points to homogeneous coordinates for triangulation
         pt1_homo = np.array([[pt1[0]], [pt1[1]]], dtype=np.float32)
@@ -213,20 +216,24 @@ class StereoTracker:
             points_3d_world = R1.T @ (points_3d_camera - t1)
             
             # Use the world z coordinate (height above court)
-            # Assuming court is at z=0 in world coordinates
             z_world = points_3d_world[2, 0]
             
             # Scale the height to reasonable values
-            # Basketball players are typically 1.5-2.2m tall
-            # If z values seem too large or small, apply scaling
             if abs(z_world) > 10:  # If values are unreasonably large
                 z_world = z_world * 0.001  # Convert from mm to m if needed
             
-            # Ensure height is positive (above court)
-            z_world = abs(z_world)
+            # Basketball convention: X (width), Y (height), Z (depth)
+            # Original: court_xy[0] (x), court_xy[1] (y), z_world
+            # New mapping: X stays X, Y becomes height, Z becomes depth
             
-            # Create final position in court coordinates
-            points_3d = np.array([court_xy[0], court_xy[1], z_world])
+            # For the ball, keep the triangulated height
+            if obj_name == 'Ball':
+                y_coord = abs(z_world)  # Height
+            else:
+                y_coord = 0.0  # Players on the ground
+            
+            # Create final position with basketball court convention
+            points_3d = np.array([court_xy[0], y_coord, court_xy[1]])  # X, Y (height), Z (depth)
         else:
             # No court transformation available, use camera coordinates
             points_3d = points_3d_camera.flatten()
@@ -259,23 +266,29 @@ class StereoTracker:
             positions = np.array(traj['positions'])
             frames = np.array(traj['frames'])
             
-            # Total distance traveled
-            distances = np.sqrt(np.sum(np.diff(positions, axis=0)**2, axis=1))
-            total_distance = np.sum(distances)
+            # Total distance traveled (considering X and Z for court movement)
+            # Y is height, so we calculate ground distance separately
+            ground_positions = positions[:, [0, 2]]  # X and Z only
+            ground_distances = np.sqrt(np.sum(np.diff(ground_positions, axis=0)**2, axis=1))
+            total_ground_distance = np.sum(ground_distances)
             
-            # Average speed (m/s)
+            # 3D distance (including height changes for ball)
+            distances_3d = np.sqrt(np.sum(np.diff(positions, axis=0)**2, axis=1))
+            total_distance_3d = np.sum(distances_3d)
+            
+            # Average speed (m/s) - ground speed for players
             time_diffs = np.diff(frames) / self.fps  # Convert frames to seconds
-            speeds = distances / time_diffs
-            avg_speed = np.mean(speeds) if len(speeds) > 0 else 0
-            max_speed = np.max(speeds) if len(speeds) > 0 else 0
+            ground_speeds = ground_distances / time_diffs
+            avg_ground_speed = np.mean(ground_speeds) if len(ground_speeds) > 0 else 0
+            max_ground_speed = np.max(ground_speeds) if len(ground_speeds) > 0 else 0
             
             # Acceleration
-            accelerations = np.diff(speeds) / time_diffs[:-1] if len(speeds) > 1 else []
+            accelerations = np.diff(ground_speeds) / time_diffs[:-1] if len(ground_speeds) > 1 else []
             avg_acceleration = np.mean(np.abs(accelerations)) if len(accelerations) > 0 else 0
             
-            # Direction changes (using angle between consecutive movement vectors)
-            if len(positions) > 2:
-                vectors = np.diff(positions, axis=0)
+            # Direction changes (using angle between consecutive movement vectors on court)
+            if len(ground_positions) > 2:
+                vectors = np.diff(ground_positions, axis=0)
                 direction_changes = 0
                 for i in range(len(vectors) - 1):
                     v1 = vectors[i]
@@ -288,22 +301,28 @@ class StereoTracker:
             else:
                 direction_changes = 0
             
-            # Coverage area (bounding box)
-            min_pos = np.min(positions, axis=0)
-            max_pos = np.max(positions, axis=0)
-            coverage_area = np.prod(max_pos[:2] - min_pos[:2])  # Using X-Y plane
+            # Coverage area (bounding box on court - X-Z plane)
+            min_pos = np.min(ground_positions, axis=0)
+            max_pos = np.max(ground_positions, axis=0)
+            coverage_area = np.prod(max_pos - min_pos)
             
-            # Height variation
-            height_variation = np.std(positions[:, 2])
+            # Height statistics (Y axis)
+            heights = positions[:, 1]
+            avg_height = np.mean(heights)
+            max_height = np.max(heights)
+            height_variation = np.std(heights)
             
             # Store metrics
             metrics[obj_name] = {
-                'total_distance_m': float(total_distance),
-                'avg_speed_ms': float(avg_speed),
-                'max_speed_ms': float(max_speed),
+                'total_ground_distance_m': float(total_ground_distance),
+                'total_3d_distance_m': float(total_distance_3d),
+                'avg_ground_speed_ms': float(avg_ground_speed),
+                'max_ground_speed_ms': float(max_ground_speed),
                 'avg_acceleration_ms2': float(avg_acceleration),
                 'direction_changes': int(direction_changes),
                 'coverage_area_m2': float(coverage_area),
+                'avg_height_m': float(avg_height),
+                'max_height_m': float(max_height),
                 'height_variation_m': float(height_variation),
                 'total_frames': len(frames),
                 'time_tracked_s': float((frames[-1] - frames[0]) / self.fps)
@@ -324,6 +343,16 @@ class StereoTracker:
                 trajectories[obj_name]['frames'].append(frame_num)
                 trajectories[obj_name]['positions'].append(obj_data['position'])
         
+        # Debug: Print trajectory information
+        print("\n=== Trajectory Debug Information ===")
+        for obj_name, traj in trajectories.items():
+            print(f"{obj_name}: {len(traj['frames'])} frames")
+            if len(traj['positions']) > 0:
+                pos = np.array(traj['positions'])
+                print(f"  Position range: X[{pos[:,0].min():.2f}, {pos[:,0].max():.2f}], "
+                      f"Y[{pos[:,1].min():.2f}, {pos[:,1].max():.2f}], "
+                      f"Z[{pos[:,2].min():.2f}, {pos[:,2].max():.2f}]")
+        
         # Create figure
         fig = go.Figure()
         
@@ -331,29 +360,30 @@ class StereoTracker:
         if self.court_corners_3d is not None:
             court_points = self.court_corners_3d
             
-            # Create court outline by connecting corners
-            # Group corners to form court lines
-            court_x = list(court_points[:, 0]) + [court_points[0, 0]]
-            court_y = list(court_points[:, 1]) + [court_points[0, 1]]
-            court_z = list(court_points[:, 2]) + [court_points[0, 2]]
+            # Convert court corners to basketball convention (X, Y=0, Z)
+            court_x = court_points[:, 0]  # X stays X
+            court_y = np.zeros_like(court_points[:, 0])  # Y = 0 (ground level)
+            court_z = court_points[:, 1]  # Original Y becomes Z (depth)
             
+            # Create court outline by connecting corners
             fig.add_trace(go.Scatter3d(
                 x=court_x, y=court_y, z=court_z,
                 mode='lines+markers',
                 name='Court Boundary',
                 line=dict(color='gray', width=2),
                 marker=dict(size=6, color='black'),
-                showlegend=True
+                showlegend=True,
+                visible=True  # Court always visible
             ))
             
-            # Add court surface (as a mesh at z=0)
+            # Add court surface (as a mesh at y=0)
             court_x_range = [np.min(court_points[:, 0]), np.max(court_points[:, 0])]
-            court_y_range = [np.min(court_points[:, 1]), np.max(court_points[:, 1])]
+            court_z_range = [np.min(court_points[:, 1]), np.max(court_points[:, 1])]
             
             # Create a grid for the court surface
-            xx, yy = np.meshgrid(np.linspace(court_x_range[0], court_x_range[1], 10),
-                                 np.linspace(court_y_range[0], court_y_range[1], 10))
-            zz = np.zeros_like(xx)
+            xx, zz = np.meshgrid(np.linspace(court_x_range[0], court_x_range[1], 10),
+                                 np.linspace(court_z_range[0], court_z_range[1], 10))
+            yy = np.zeros_like(xx)  # Y = 0 for court surface
             
             fig.add_trace(go.Surface(
                 x=xx, y=yy, z=zz,
@@ -361,22 +391,22 @@ class StereoTracker:
                 opacity=0.3,
                 showscale=False,
                 name='Court Surface',
-                showlegend=False
+                showlegend=False,
+                visible=True  # Court always visible
             ))
         
-        # Create visibility lists for grouping traces
-        trace_visibility_groups = []
+        # Keep track of which traces are court-related (always visible)
+        num_court_traces = len(fig.data)
         
         # Add player trajectories with grouped start/end markers
+        player_traces_added = []
         for i, (obj_name, traj) in enumerate(trajectories.items()):
             if len(traj['positions']) < 2:
+                print(f"Skipping {obj_name}: only {len(traj['positions'])} position(s)")
                 continue
                 
             positions = np.array(traj['positions'])
             frames = traj['frames']
-            
-            # Store the starting index for this player's traces
-            start_trace_idx = len(fig.data)
             
             # Create hover text with metrics
             hover_text = []
@@ -385,23 +415,24 @@ class StereoTracker:
                 text += f"Frame: {frame}<br>"
                 text += f"Position: ({positions[j, 0]:.2f}, {positions[j, 1]:.2f}, {positions[j, 2]:.2f}) m<br>"
                 if obj_name in metrics:
-                    text += f"Avg Speed: {metrics[obj_name]['avg_speed_ms']:.2f} m/s<br>"
-                    text += f"Total Distance: {metrics[obj_name]['total_distance_m']:.2f} m"
+                    
+                    text += f"Avg Speed: {metrics[obj_name]['avg_ground_speed_ms']:.2f} m/s<br>"
+                    text += f"Total Distance: {metrics[obj_name]['total_3d_distance_m']:.2f} m"
                 hover_text.append(text)
             
             # Add trajectory
             fig.add_trace(go.Scatter3d(
-                x=positions[:, 0],
-                y=positions[:, 1],
-                z=positions[:, 2],
+                x=positions[:, 0],  # X (width)
+                y=positions[:, 1],  # Y (height)
+                z=positions[:, 2],  # Z (depth)
                 mode='lines+markers',
-                name=f'Player {obj_name}',
+                name=f'{obj_name}',
                 line=dict(color=plotly_colors[i % len(plotly_colors)], width=4),
                 marker=dict(size=3),
                 text=hover_text,
                 hoverinfo='text',
-                legendgroup=f'player{obj_name}',  # Group all traces for this player
-                visible=True
+                legendgroup=f'player{obj_name}',
+                visible=False  # Start with all players hidden
             ))
             
             # Add start marker (grouped with main trace)
@@ -413,8 +444,8 @@ class StereoTracker:
                 name=f'Start {obj_name}',
                 marker=dict(size=10, color=plotly_colors[i % len(plotly_colors)], symbol='circle'),
                 showlegend=False,
-                legendgroup=f'player{obj_name}',  # Same group as trajectory
-                visible=True
+                legendgroup=f'player{obj_name}',
+                visible=False  # Start hidden
             ))
             
             # Add end marker (grouped with main trace)
@@ -426,50 +457,48 @@ class StereoTracker:
                 name=f'End {obj_name}',
                 marker=dict(size=10, color=plotly_colors[i % len(plotly_colors)], symbol='square'),
                 showlegend=False,
-                legendgroup=f'player{obj_name}',  # Same group as trajectory
-                visible=True
+                legendgroup=f'player{obj_name}',
+                visible=False  # Start hidden
             ))
             
-            # Store the trace indices for this player
-            trace_visibility_groups.append({
-                'name': f'Player {obj_name}',
-                'traces': list(range(start_trace_idx, len(fig.data)))
-            })
+            player_traces_added.append(obj_name)
         
-        # Update layout
+        print(f"\nAdded traces for {len(player_traces_added)} players: {player_traces_added}")
+        
+        # Update layout with basketball court axis convention
         fig.update_layout(
             title={
-                'text': 'Basketball Player 3D Trajectories<br><sub>Interactive visualization with player filtering</sub>',
+                'text': 'Basketball Player 3D Trajectories<br><sub>Click on player names to show/hide trajectories</sub>',
                 'x': 0.5,
                 'xanchor': 'center'
             },
             scene=dict(
                 xaxis=dict(
-                    title='X (meters)',
+                    title='X - Width (meters)',
                     gridcolor='rgb(255, 255, 255)',
                     zerolinecolor='rgb(255, 255, 255)',
                     showbackground=True,
                     backgroundcolor='rgb(230, 230,230)'
                 ),
                 yaxis=dict(
-                    title='Y (meters)',
+                    title='Y - Height (meters)',
+                    gridcolor='rgb(255, 255, 255)',
+                    zerolinecolor='rgb(255, 255, 255)',
+                    showbackground=True,
+                    backgroundcolor='rgb(230, 230,230)',
+                    range=[0, 4]  # Limit height range
+                ),
+                zaxis=dict(
+                    title='Z - Depth (meters)',
                     gridcolor='rgb(255, 255, 255)',
                     zerolinecolor='rgb(255, 255, 255)',
                     showbackground=True,
                     backgroundcolor='rgb(230, 230,230)'
                 ),
-                zaxis=dict(
-                    title='Z (meters)',
-                    gridcolor='rgb(255, 255, 255)',
-                    zerolinecolor='rgb(255, 255, 255)',
-                    showbackground=True,
-                    backgroundcolor='rgb(230, 230,230)',
-                    range=[0, 3]  # Limit Z range for better visualization
-                ),
                 aspectmode='manual',
-                aspectratio=dict(x=2, y=1, z=0.3),  # Adjust for basketball court proportions
+                aspectratio=dict(x=2, y=0.5, z=1),  # Adjust for basketball court proportions
                 camera=dict(
-                    eye=dict(x=0, y=-2.5, z=1.5),  # Side view
+                    eye=dict(x=0, y=1.5, z=-2.5),  # Side view
                     center=dict(x=0, y=0, z=0)
                 )
             ),
@@ -478,10 +507,39 @@ class StereoTracker:
                 itemsizing='constant',
                 x=1.02,
                 y=0.5,
-                yanchor='middle'
+                yanchor='middle',
+                title=dict(text='Players (click to show/hide)')
             ),
             width=1200,
             height=800
+        )
+        
+        # Add buttons to show/hide all players
+        fig.update_layout(
+            updatemenus=[
+                dict(
+                    type="buttons",
+                    direction="left",
+                    buttons=list([
+                        dict(
+                            args=[{"visible": [True] * num_court_traces + [True] * (len(fig.data) - num_court_traces)}],
+                            label="Show All Players",
+                            method="update"
+                        ),
+                        dict(
+                            args=[{"visible": [True] * num_court_traces + [False] * (len(fig.data) - num_court_traces)}],
+                            label="Hide All Players",
+                            method="update"
+                        )
+                    ]),
+                    pad={"r": 10, "t": 10},
+                    showactive=True,
+                    x=0.11,
+                    xanchor="left",
+                    y=1.1,
+                    yanchor="top"
+                )
+            ]
         )
         
         # Save the interactive plot
@@ -505,9 +563,9 @@ class StereoTracker:
         
         # Extract player names and metrics
         players = list(metrics.keys())
-        avg_speeds = [metrics[p]['avg_speed_ms'] for p in players]
-        max_speeds = [metrics[p]['max_speed_ms'] for p in players]
-        distances = [metrics[p]['total_distance_m'] for p in players]
+        avg_speeds = [metrics[p]['avg_ground_speed_ms'] for p in players]
+        max_speeds = [metrics[p]['max_ground_speed_ms'] for p in players]
+        distances = [metrics[p]['total_ground_distance_m'] for p in players]
         areas = [metrics[p]['coverage_area_m2'] for p in players]
         accelerations = [metrics[p]['avg_acceleration_ms2'] for p in players]
         direction_changes = [metrics[p]['direction_changes'] for p in players]
@@ -592,17 +650,39 @@ class StereoTracker:
         tracking_2d_results = {}
         tracking_3d_results = {}
         
+        # Track which objects appear and how often
+        object_appearance_count = {}
+        matched_count = {}
+        
         frame_idx = 0
         
         for detection1, detection2 in tqdm(zip(self.det1, self.det2)):
+            # Track objects in each camera
+            for obj in detection1:
+                if obj not in object_appearance_count:
+                    object_appearance_count[obj] = {'cam1': 0, 'cam2': 0, 'matched': 0}
+                object_appearance_count[obj]['cam1'] += 1
+                
+            for obj in detection2:
+                if obj not in object_appearance_count:
+                    object_appearance_count[obj] = {'cam1': 0, 'cam2': 0, 'matched': 0}
+                object_appearance_count[obj]['cam2'] += 1
+            
             # Match objects between views
             matches = self.match_objects(detection1, detection2)
+            
+            # Track matched objects
+            for obj_name in matches:
+                if obj_name not in matched_count:
+                    matched_count[obj_name] = 0
+                matched_count[obj_name] += 1
+                object_appearance_count[obj_name]['matched'] += 1
             
             # Triangulate 3D positions
             frame_3d = {}
             for obj_name, match in matches.items():
                 try:
-                    pos_3d = self.triangulate_point(match['pt1'], match['pt2'])
+                    pos_3d = self.triangulate_point(match['pt1'], match['pt2'], obj_name)
                     frame_3d[obj_name] = {
                         'position': pos_3d.tolist(),
                     }
@@ -623,6 +703,18 @@ class StereoTracker:
             if frame_idx % 100 == 0:
                 print(f"Processed {frame_idx} frames...")
         
+        # Print detection and matching statistics
+        print("\n=== Object Detection and Matching Statistics ===")
+        print(f"{'Object':<15} {'Cam1':<8} {'Cam2':<8} {'Matched':<8} {'Match %':<8}")
+        print("-" * 50)
+        for obj_name, counts in sorted(object_appearance_count.items()):
+            cam1_count = counts['cam1']
+            cam2_count = counts['cam2']
+            matched = counts['matched']
+            max_possible = min(cam1_count, cam2_count)
+            match_percentage = (matched / max_possible * 100) if max_possible > 0 else 0
+            print(f"{obj_name:<15} {cam1_count:<8} {cam2_count:<8} {matched:<8} {match_percentage:<8.1f}%")
+        
         # Save results
         with open(json_2d_path, "w") as f:
             json.dump(tracking_2d_results, f, indent=2)
@@ -630,7 +722,7 @@ class StereoTracker:
         with open(json_3d_path, "w") as f:
             json.dump(tracking_3d_results, f, indent=2)
         
-        print(f"Tracking complete!")
+        print(f"\nTracking complete!")
         print(f"2D results saved to {json_2d_path}")
         print(f"3D results saved to {json_3d_path}")
         
@@ -645,7 +737,6 @@ class StereoTracker:
         
         # Create interactive visualization
         interactive_path = os.path.join(output_dir, "interactive_3d_trajectories.html")
-        breakpoint()
         self.create_interactive_3d_plot(tracking_3d_results, metrics, interactive_path)
         
         # Optionally save 3D data in specific format
@@ -709,11 +800,13 @@ def main():
     
     print("\n=== Summary of Player Metrics ===")
     for player, player_metrics in metrics.items():
-        print(f"\nPlayer {player}:")
-        print(f"  - Total distance: {player_metrics['total_distance_m']:.2f} m")
-        print(f"  - Average speed: {player_metrics['avg_speed_ms']:.2f} m/s")
-        print(f"  - Max speed: {player_metrics['max_speed_ms']:.2f} m/s")
+        print(f"\n{player}:")
+        print(f"  - Total ground distance: {player_metrics['total_ground_distance_m']:.2f} m")
+        print(f"  - Average ground speed: {player_metrics['avg_ground_speed_ms']:.2f} m/s")
+        print(f"  - Max ground speed: {player_metrics['max_ground_speed_ms']:.2f} m/s")
         print(f"  - Coverage area: {player_metrics['coverage_area_m2']:.2f} m²")
+        print(f"  - Average height: {player_metrics['avg_height_m']:.2f} m")
+        print(f"  - Max height: {player_metrics['max_height_m']:.2f} m")
         print(f"  - Direction changes: {player_metrics['direction_changes']}")
 
 
