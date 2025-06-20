@@ -11,8 +11,28 @@ from datetime import datetime
 IMG_WIDTH = 3840
 IMG_HEIGHT = 2160
 
+colors = [
+    (255, 0, 0),    # Red
+    (0, 255, 0),    # Green
+    (0, 0, 255),    # Blue
+    (255, 255, 0),  # Yellow
+    (255, 0, 255),  # Magenta
+    (0, 255, 255),  # Cyan
+    (255, 165, 0),  # Orange
+    (128, 0, 128),  # Purple
+    (165, 42, 42),  # Brown
+    (0, 0, 0),      # Black
+    (255, 255, 255),# White
+    (128, 128, 128),# Gray
+    (0, 128, 0)     # Dark Green
+]
+
 class StereoTracker:
-    def __init__(self, cam1_params_path, cam2_params_path):
+    def __init__(self,detection1_path,detection2_path, cam1_params_path, cam2_params_path):
+        
+        
+        self.det1=self.load_detections(detection1_path)
+        self.det2=self.load_detections(detection2_path)
         # Load camera parameters
         self.cam1_params = self.load_camera_params(cam1_params_path)
         self.cam2_params = self.load_camera_params(cam2_params_path)
@@ -21,6 +41,30 @@ class StereoTracker:
         self.P1 = self.compute_projection_matrix(self.cam1_params)
         self.P2 = self.compute_projection_matrix(self.cam2_params)
         
+
+    def load_detections(self, detection_path):
+        """Load camera parameters from JSON file and format the keys."""
+        with open(detection_path, 'r') as f:
+            params = json.load(f)
+
+        # Create a new dictionary with formatted keys
+        formatted_params = []
+        for key, value in params.items():
+            # Extract the numerical part from the key and convert it to an integer
+            formatted_params.append({})
+            # Extract class_id and bbox
+            for x in value:
+                class_id = x['class_id']
+                bbox = x['bbox']    
+                
+                # Add the class_id and bbox to the nested dictionary
+                formatted_params[-1][class_id] = {
+                    'bbox': bbox,
+                    'center': [bbox[0], bbox[1]]  # x_center, y_center already in bbox
+                }
+
+        return formatted_params
+
     def load_camera_params(self, params_path):
         """Load camera parameters from JSON file"""
         with open(params_path, 'r') as f:
@@ -59,10 +103,9 @@ class StereoTracker:
             if obj_name in det2:
                 matches[obj_name] = {
                     'pt1': det1[obj_name]['center'],
-                    'pt2': det2[obj_name]['center'],
-                    'conf1': det1[obj_name]['conf'],
-                    'conf2': det2[obj_name]['conf']
+                    'pt2': det2[obj_name]['center']
                 }
+        
         
         return matches
     
@@ -96,37 +139,36 @@ class StereoTracker:
         tracking_3d_results = {}
         
         frame_idx = 0
-        length = int(self.cap1.get(cv2.CAP_PROP_FRAME_COUNT))
-        pbar = tqdm(total=length)
         
-        # Match objects between views
-        matches = self.match_objects(detections1, detections2)
-        # Triangulate 3D positions
-        frame_3d = {}
-        for obj_name, match in matches.items():
-            try:
-                pos_3d = self.triangulate_point(match['pt1'], match['pt2'])
-                frame_3d[obj_name] = {
-                    'position': pos_3d.tolist(),
-                    'confidence': (match['conf1'] + match['conf2']) / 2
+        for detection1,detection2 in tqdm(zip(self.det1,self.det2)):
+            # Match objects between views
+            matches = self.match_objects(detection1, detection2)
+            
+            # Triangulate 3D positions
+            frame_3d = {}
+            for obj_name, match in matches.items():
+                try:
+                    pos_3d = self.triangulate_point(match['pt1'], match['pt2'])
+                    frame_3d[obj_name] = {
+                        'position': pos_3d.tolist(),
+                    }
+                except Exception as e:
+                    print(f"Triangulation failed for {obj_name} at frame {frame_idx}: {e}")
+
+                # Store results
+                frame_key = f"frame_{frame_idx}"
+                tracking_2d_results[frame_key] = {
+                    'view1': detection1,
+                    'view2': detection2,
+                    'matches': matches
                 }
-            except Exception as e:
-                print(f"Triangulation failed for {obj_name} at frame {frame_idx}: {e}")
-            
-            # Store results
-            frame_key = f"frame_{frame_idx}"
-            tracking_2d_results[frame_key] = {
-                'view1': detections1,
-                'view2': detections2,
-                'matches': matches
-            }
-            tracking_3d_results[frame_key] = frame_3d
-            frame_idx += 1
-            
+                tracking_3d_results[frame_key] = frame_3d
+                frame_idx += 1
+
             if frame_idx % 100 == 0:
                 print(f"Processed {frame_idx} frames...")
         
-        pbar.close()
+        
         # Save results
         with open(json_2d_path, "w") as f:
             json.dump(tracking_2d_results, f, indent=2)
@@ -148,9 +190,8 @@ class StereoTracker:
     def save_3d_trajectories(self, tracking_3d_results, output_path):
         """Save 3D trajectories in CSV format"""
         import csv
-        
         with open(output_path, 'w', newline='') as csvfile:
-            fieldnames = ['frame', 'object', 'x', 'y', 'z', 'confidence']
+            fieldnames = ['frame', 'object', 'x', 'y', 'z']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             
@@ -163,8 +204,7 @@ class StereoTracker:
                         'object': obj_name,
                         'x': pos[0],
                         'y': pos[1],
-                        'z': pos[2],
-                        'confidence': obj_data['confidence']
+                        'z': pos[2]
                     })
         
         print(f"3D trajectories saved to {output_path}")
@@ -175,6 +215,7 @@ class StereoTracker:
         ax = fig.add_subplot(111, projection='3d')
         
         # Extract trajectories for each object
+        
         trajectories = {}
         for frame_key, frame_data in tracking_3d_results.items():
             frame_num = int(frame_key.split('_')[1])
@@ -215,12 +256,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run stereo YOLO tracking with 3D triangulation")
     
     # Video inputs
-    parser.add_argument("--video1", type=str, required=True, help="Path to left camera video")
-    parser.add_argument("--video2", type=str, required=True, help="Path to right camera video")
-    
-    # Model
-    parser.add_argument("--modelP", type=str, required=True, help="Path to YOLO model for players")
-    parser.add_argument("--modelB", type=str, required=True, help="Path to YOLO model for the ball")
+    parser.add_argument("--video1", type=str, required=True, help="Path to left camera detection")
+    parser.add_argument("--video2", type=str, required=True, help="Path to right camera detection")
     
     # Camera parameters
     parser.add_argument("--camparams1", type=str, required=True, help="Path to camera 1 parameters JSON")
@@ -234,7 +271,7 @@ def main():
     
     # Initialize tracker
     tracker = StereoTracker(
-        args.modelP,args.modelB, args.video1, args.video2, args.camparams1, args.camparams2
+         args.video1, args.video2, args.camparams1, args.camparams2
     )
     
     # Run tracking
@@ -242,7 +279,7 @@ def main():
     
     # Optional visualization
     if args.visualize:
-        output_dir = os.path.join("outputs", f"stereo_{os.path.splitext(os.path.basename(args.video1))[0]}_{os.path.splitext(os.path.basename(args.video2))[0]}")
+        output_dir = os.path.join("outputs", f"stereo")
         viz_path = os.path.join(output_dir, "3d_trajectories.png")
         tracker.visualize_3d_trajectories(tracking_3d_results, viz_path)
 
