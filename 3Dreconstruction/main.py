@@ -9,8 +9,9 @@ from tqdm import tqdm
 from datetime import datetime
 
 class StereoTracker:
-    def __init__(self, model_path, video1_path, video2_path, cam1_params_path, cam2_params_path):
-        self.model = YOLO(model_path)
+    def __init__(self, model_players_path, model_ball_path,video1_path, video2_path, cam1_params_path, cam2_params_path):
+        self.model_players = YOLO(model_players_path)
+        self.model_ball = YOLO(model_ball_path)
         self.video1_path = video1_path
         self.video2_path = video2_path
         
@@ -78,7 +79,8 @@ class StereoTracker:
     
     def detect_objects(self, frame):
         """Detect objects in frame and return best detection per class"""
-        results = self.model(frame,verbose = False)[0]
+        results = self.model_players(frame,verbose = False)[0]
+        results_ball = self.model_ball(frame,verbose=False)[0]
         detections = {}
         
         if results.boxes is not None:
@@ -86,7 +88,7 @@ class StereoTracker:
             best_by_class = {}
             
             for i in range(len(boxes)):
-                cls_id = int(boxes.cls[i].item())
+                cls_id = int(boxes.cls[i].item())+1
                 conf = float(boxes.conf[i].item())
                 x_center, y_center, w, h = boxes.xywh[i].tolist()
                 
@@ -98,13 +100,26 @@ class StereoTracker:
                         'conf': conf
                     }
             
-            # Convert to object names (customize based on your YOLO classes)
-            classes =['Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 'Refree_F', 'Refree_M', 'White_13', 'White_16', 'White_25', 'White_27', 'White_34']
-            class_names = {id:name for id,name in enumerate(classes)}
-            
-            for cls_id, det in best_by_class.items():
-                obj_name = class_names.get(cls_id, f'object_{cls_id}')
-                detections[obj_name] = det
+        if results_ball.boxes is not None:
+            boxes = results_ball.boxes
+            for i in range(len(boxes)):
+                cls_id = int(boxes.cls[i].item())
+                conf = float(boxes.conf[i].item())
+                x_center, y_center, w, h = boxes.xywh[i].tolist()
+                if cls_id not in best_by_class or conf > best_by_class[cls_id]['conf']:
+                    best_by_class[cls_id] = {
+                        'class_id': cls_id,
+                        'center': (x_center, y_center),
+                        'bbox': (x_center, y_center, w, h),
+                        'conf': conf
+                    }
+        # Convert to object names (customize based on your YOLO classes)
+        classes =['Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 'Refree_F', 'Refree_M', 'White_13', 'White_16', 'White_25', 'White_27', 'White_34']
+        class_names = {id:name for id,name in enumerate(classes)}
+        
+        for cls_id, det in best_by_class.items():
+            obj_name = class_names.get(cls_id, f'object_{cls_id}')
+            detections[obj_name] = det
         
         return detections
     
@@ -334,7 +349,8 @@ def main():
     parser.add_argument("--video2", type=str, required=True, help="Path to right camera video")
     
     # Model
-    parser.add_argument("--model", type=str, required=True, help="Path to YOLO model")
+    parser.add_argument("--modelP", type=str, required=True, help="Path to YOLO model for players")
+    parser.add_argument("--modelB", type=str, required=True, help="Path to YOLO model for the ball")
     
     # Camera parameters
     parser.add_argument("--camparams1", type=str, required=True, help="Path to camera 1 parameters JSON")
@@ -348,7 +364,7 @@ def main():
     
     # Initialize tracker
     tracker = StereoTracker(
-        args.model, args.video1, args.video2, args.camparams1, args.camparams2
+        args.modelP,args.modelB, args.video1, args.video2, args.camparams1, args.camparams2
     )
     
     # Run tracking
