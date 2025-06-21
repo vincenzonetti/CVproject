@@ -30,19 +30,15 @@ def clean_trajectories(tracking_3d_results: Dict, fps: float = 25) -> Dict:
     # Clean each trajectory
     cleaned_trajectories = {}
     for obj_name, traj_data in trajectories.items():
-        if obj_name == 'Ball':
-            # Skip cleaning for ball - allow high velocities
-            cleaned_trajectories[obj_name] = traj_data
-        else:
-            # Clean player trajectories
-            cleaned_traj = clean_single_trajectory(
-                traj_data['frames'], 
-                traj_data['positions'], 
-                fps, 
-                obj_name
-            )
-            if cleaned_traj:
-                cleaned_trajectories[obj_name] = cleaned_traj
+        # Clean player trajectories
+        cleaned_traj = clean_single_trajectory(
+            traj_data['frames'], 
+            traj_data['positions'], 
+            fps, 
+            obj_name
+        )
+        if cleaned_traj:
+            cleaned_trajectories[obj_name] = cleaned_traj
     
     # Rebuild tracking results from cleaned trajectories
     cleaned_results = rebuild_tracking_results(cleaned_trajectories)
