@@ -1,286 +1,189 @@
+"""
+Main entry point for basketball stereo tracking system.
+
+This module orchestrates the entire tracking pipeline including
+data loading, matching, triangulation, metrics calculation,
+and visualization generation.
+"""
+
 import argparse
 import os
 import json
-import cv2
-import numpy as np
-from ultralytics import YOLO
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 from datetime import datetime
+from tqdm import tqdm
+from typing import Dict, Tuple, Optional
+
+# Import all modules
+from config import (
+    OUTPUT_DIR, TRACKING_2D_FILENAME, TRACKING_3D_FILENAME,
+    METRICS_FILENAME, INTERACTIVE_PLOT_FILENAME, METRICS_DASHBOARD_FILENAME,
+    DEFAULT_FPS
+)
+from loader import load_stereo_data
+from tracking.matcher import match_objects, compute_matching_statistics, print_matching_statistics
+from tracking.triangulator import Triangulator, compute_projection_matrix
+from tracking.metrics import calculate_trajectory_metrics
+from tracking.cleaner import clean_trajectories
+from utils.court import setup_court_transformation
+from visualization.plot_3d import create_interactive_3d_plot
+from visualization.dashboard import create_metrics_dashboard
+
 
 class StereoTracker:
-    def __init__(self, model_players_path, model_ball_path,video1_path, video2_path, cam1_params_path, cam2_params_path):
-        self.model_players = YOLO(model_players_path)
-        self.model_ball = YOLO(model_ball_path)
-        self.video1_path = video1_path
-        self.video2_path = video2_path
+    """Main class for stereo basketball tracking."""
+    
+    def __init__(self, data: Dict, fps: int = DEFAULT_FPS):
+        """
+        Initialize the stereo tracker.
         
-        # Load camera parameters
-        self.cam1_params = self.load_camera_params(cam1_params_path)
-        self.cam2_params = self.load_camera_params(cam2_params_path)
+        Args:
+            data: Dictionary containing all loaded data
+            fps: Frames per second for video
+        """
+        self.det1 = data['detections1']
+        self.det2 = data['detections2']
+        self.cam1_params = data['cam1_params']
+        self.cam2_params = data['cam2_params']
+        self.fps = fps
         
         # Compute projection matrices
-        self.P1 = self.compute_projection_matrix(self.cam1_params)
-        self.P2 = self.compute_projection_matrix(self.cam2_params)
+        self.P1 = compute_projection_matrix(self.cam1_params)
+        self.P2 = compute_projection_matrix(self.cam2_params)
         
-        # Initialize video captures
-        self.cap1 = cv2.VideoCapture(video1_path)
-        self.cap2 = cv2.VideoCapture(video2_path)
+        # Setup court transformation if corners available
+        self.court_corners_3d = None
+        self.H1 = None
+        self.H2 = None
         
-        # Verify both videos have same frame count and FPS
-        self.verify_video_sync()
+        if 'cam1_real_corners' in data and 'cam2_real_corners' in data:
+            cam1_corners = (data['cam1_real_corners'], data['cam1_img_corners'])
+            cam2_corners = (data['cam2_real_corners'], data['cam2_img_corners'])
+            self.H1, self.H2, self.court_corners_3d = setup_court_transformation(
+                cam1_corners, cam2_corners
+            )
         
-    def load_camera_params(self, params_path):
-        """Load camera parameters from JSON file"""
-        with open(params_path, 'r') as f:
-            params = json.load(f)
-        
-        # Convert lists to numpy arrays
-        params['mtx'] = np.array(params['mtx'])
-        params['dist'] = np.array(params['dist'])
-        params['rvecs'] = np.array(params['rvecs'])
-        params['tvecs'] = np.array(params['tvecs'])
-        
-        return params
+        # Initialize triangulator
+        self.triangulator = Triangulator(
+            self.P1, self.P2, self.cam1_params, self.H1, self.H2
+        )
     
-    def compute_projection_matrix(self, cam_params):
-        """Compute projection matrix P = K[R|t], maps 3D points into 2D one"""
-        K = cam_params['mtx']  # Intrinsic matrix
-        rvec = cam_params['rvecs']
-        tvec = cam_params['tvecs']
+    def run_tracking(self, output_3d: Optional[str] = None) -> Tuple[Dict, Dict]:
+        """
+        Run the complete tracking pipeline.
         
-        # Convert rotation vector to rotation matrix
-        R, _ = cv2.Rodrigues(rvec)
-        
-        # Create [R|t] matrix
-        Rt = np.hstack((R, tvec.reshape(-1, 1)))
-        
-        # Compute projection matrix P = K[R|t]
-        P = K @ Rt
-        
-        return P
-    
-    def verify_video_sync(self):
-        """Verify that both videos have the same properties"""
-        fps1 = self.cap1.get(cv2.CAP_PROP_FPS)
-        fps2 = self.cap2.get(cv2.CAP_PROP_FPS)
-        
-        frame_count1 = int(self.cap1.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_count2 = int(self.cap2.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        if abs(fps1 - fps2) > 0.1:
-            print(f"Warning: FPS mismatch - Video1: {fps1}, Video2: {fps2}")
-        
-        if abs(frame_count1 - frame_count2) > 1:
-            print(f"Warning: Frame count mismatch - Video1: {frame_count1}, Video2: {frame_count2}")
-        
-        self.fps = fps1
-        self.frame_count = min(frame_count1, frame_count2)
-    
-    def detect_objects(self, frame):
-        """Detect objects in frame and return best detection per class"""
-        results = self.model_players(frame,verbose = False)[0]
-        results_ball = self.model_ball(frame,verbose=False)[0]
-        detections = {}
-        
-        if results.boxes is not None:
-            boxes = results.boxes
-            best_by_class = {}
+        Args:
+            output_3d: Optional path to save 3D trajectories CSV
             
-            for i in range(len(boxes)):
-                cls_id = int(boxes.cls[i].item())+1
-                conf = float(boxes.conf[i].item())
-                x_center, y_center, w, h = boxes.xywh[i].tolist()
-                
-                if cls_id not in best_by_class or conf > best_by_class[cls_id]['conf']:
-                    best_by_class[cls_id] = {
-                        'class_id': cls_id,
-                        'center': (x_center, y_center),
-                        'bbox': (x_center, y_center, w, h),
-                        'conf': conf
-                    }
-            
-        if results_ball.boxes is not None:
-            boxes = results_ball.boxes
-            for i in range(len(boxes)):
-                cls_id = int(boxes.cls[i].item())
-                conf = float(boxes.conf[i].item())
-                x_center, y_center, w, h = boxes.xywh[i].tolist()
-                if cls_id not in best_by_class or conf > best_by_class[cls_id]['conf']:
-                    best_by_class[cls_id] = {
-                        'class_id': cls_id,
-                        'center': (x_center, y_center),
-                        'bbox': (x_center, y_center, w, h),
-                        'conf': conf
-                    }
-        # Convert to object names (customize based on your YOLO classes)
-        classes =['Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 'Refree_F', 'Refree_M', 'White_13', 'White_16', 'White_25', 'White_27', 'White_34']
-        class_names = {id:name for id,name in enumerate(classes)}
+        Returns:
+            Tuple of (tracking_3d_results, metrics)
+        """
+        # Setup output directory
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         
-        for cls_id, det in best_by_class.items():
-            obj_name = class_names.get(cls_id, f'object_{cls_id}')
-            detections[obj_name] = det
-        
-        return detections
-    
-    def match_objects(self, det1, det2):
-        """Match objects between two views based on class similarity"""
-        matches = {}
-        
-        for obj_name in det1:
-            if obj_name in det2:
-                matches[obj_name] = {
-                    'pt1': det1[obj_name]['center'],
-                    'pt2': det2[obj_name]['center'],
-                    'conf1': det1[obj_name]['conf'],
-                    'conf2': det2[obj_name]['conf']
-                }
-        
-        return matches
-    
-    def triangulate_point(self, pt1, pt2):
-        """Triangulate 3D point from 2D correspondences"""
-        # Convert points to homogeneous coordinates for triangulation
-        pt1_homo = np.array([[pt1[0]], [pt1[1]]], dtype=np.float32)
-        pt2_homo = np.array([[pt2[0]], [pt2[1]]], dtype=np.float32)
-        
-        # Triangulate
-        points_4d = cv2.triangulatePoints(self.P1, self.P2, pt1_homo, pt2_homo)
-        
-        # Convert from homogeneous to 3D coordinates
-        points_3d = points_4d[:3] / points_4d[3]
-        
-        return points_3d.flatten()
-    
-    def draw_detections(self, frame, detections, frame_id):
-        """Draw bounding boxes and labels on frame"""
-        img_h, img_w = frame.shape[:2]
-        
-        for obj_name, det in detections.items():
-            xc, yc, w, h = det['bbox']
-            x1 = int((xc - w / 2))
-            y1 = int((yc - h / 2))
-            x2 = int((xc + w / 2))
-            y2 = int((yc + h / 2))
-            
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(frame, f"{obj_name}", (x1, y1 - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-        
-        return frame
-    
-    def run_tracking(self, output_3d=None):
-        """Main tracking loop with triangulation"""
-        # Setup output directories
-        video1_name = os.path.splitext(os.path.basename(self.video1_path))[0]
-        video2_name = os.path.splitext(os.path.basename(self.video2_path))[0]
-        
-        
-        output_dir = os.path.join("outputs", f"stereo_{video1_name}_{video2_name}")
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Output paths
-        json_2d_path = os.path.join(output_dir, "tracking_2d_results.json")
-        json_3d_path = os.path.join(output_dir, "tracking_3d_results.json")
-        video1_output_path = os.path.join(output_dir, "tracked_video1.mp4")
-        video2_output_path = os.path.join(output_dir, "tracked_video2.mp4")
-        
-        # Get video properties
-        width1 = int(self.cap1.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height1 = int(self.cap1.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        width2 = int(self.cap2.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height2 = int(self.cap2.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out_video1 = cv2.VideoWriter(video1_output_path, fourcc, self.fps, (width1, height1))
-        out_video2 = cv2.VideoWriter(video2_output_path, fourcc, self.fps, (width2, height2))
-        
-        # Results storage
+        # Initialize results storage
         tracking_2d_results = {}
         tracking_3d_results = {}
         
-        frame_idx = 0
-        length = int(self.cap1.get(cv2.CAP_PROP_FRAME_COUNT))
-        pbar = tqdm(total=length)
-        while self.cap1.isOpened() and self.cap2.isOpened():
-            pbar.update(1)
-            ret1, frame1 = self.cap1.read()
-            ret2, frame2 = self.cap2.read()
-            
-            if not ret1 or not ret2:
-                break
-            
-            # Detect objects in both frames
-            detections1 = self.detect_objects(frame1)
-            detections2 = self.detect_objects(frame2)
-            
+        # Track statistics
+        matching_stats = compute_matching_statistics(self.det1, self.det2)
+        
+        # Main tracking loop
+        print("Processing frames...")
+        for frame_idx, (detection1, detection2) in enumerate(tqdm(zip(self.det1, self.det2))):
             # Match objects between views
-            matches = self.match_objects(detections1, detections2)
+            matches = match_objects(detection1, detection2)
+            
             # Triangulate 3D positions
             frame_3d = {}
             for obj_name, match in matches.items():
                 try:
-                    pos_3d = self.triangulate_point(match['pt1'], match['pt2'])
-                    frame_3d[obj_name] = {
-                        'position': pos_3d.tolist(),
-                        'confidence': (match['conf1'] + match['conf2']) / 2
-                    }
+                    pos_3d = self.triangulator.triangulate_point(
+                        match['pt1'], match['pt2'], obj_name
+                    )
+                    frame_3d[obj_name] = {'position': pos_3d.tolist()}
                 except Exception as e:
                     print(f"Triangulation failed for {obj_name} at frame {frame_idx}: {e}")
             
             # Store results
             frame_key = f"frame_{frame_idx}"
             tracking_2d_results[frame_key] = {
-                'view1': detections1,
-                'view2': detections2,
+                'view1': detection1,
+                'view2': detection2,
                 'matches': matches
             }
             tracking_3d_results[frame_key] = frame_3d
             
-            # Draw detections on frames
-            frame1_annotated = self.draw_detections(frame1.copy(), detections1, frame_idx)
-            frame2_annotated = self.draw_detections(frame2.copy(), detections2, frame_idx)
-            
-            # Write annotated frames
-            out_video1.write(frame1_annotated)
-            out_video2.write(frame2_annotated)
-            
-            frame_idx += 1
-            
-            if frame_idx % 100 == 0:
+            if frame_idx % 100 == 0 and frame_idx > 0:
                 print(f"Processed {frame_idx} frames...")
         
-        pbar.close()
-        # Cleanup
-        self.cap1.release()
-        self.cap2.release()
-        out_video1.release()
-        out_video2.release()
+        # Print matching statistics
+        print_matching_statistics(matching_stats)
+        
+        # Clean trajectories to remove false positives
+        print("\nCleaning trajectories...")
+        tracking_3d_results = clean_trajectories(tracking_3d_results, self.fps)
         
         # Save results
+        self._save_results(tracking_2d_results, tracking_3d_results)
+        
+        # Calculate trajectory metrics
+        print("\nCalculating trajectory metrics...")
+        metrics = calculate_trajectory_metrics(tracking_3d_results, self.fps)
+        
+        # Save metrics
+        metrics_path = os.path.join(OUTPUT_DIR, METRICS_FILENAME)
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+        print(f"Trajectory metrics saved to {metrics_path}")
+        
+        # Create visualizations
+        self._create_visualizations(tracking_3d_results, metrics)
+        
+        # Optionally save 3D trajectories CSV
+        if output_3d:
+            self._save_3d_trajectories_csv(tracking_3d_results, output_3d)
+        
+        # Print summary
+        self._print_summary(metrics)
+        
+        return tracking_3d_results, metrics
+    
+    def _save_results(self, tracking_2d_results: Dict, tracking_3d_results: Dict) -> None:
+        """Save tracking results to JSON files."""
+        # Save 2D results
+        json_2d_path = os.path.join(OUTPUT_DIR, TRACKING_2D_FILENAME)
         with open(json_2d_path, "w") as f:
             json.dump(tracking_2d_results, f, indent=2)
+        print(f"\n2D results saved to {json_2d_path}")
         
+        # Save 3D results
+        json_3d_path = os.path.join(OUTPUT_DIR, TRACKING_3D_FILENAME)
         with open(json_3d_path, "w") as f:
             json.dump(tracking_3d_results, f, indent=2)
-        
-        print(f"Tracking complete!")
-        print(f"2D results saved to {json_2d_path}")
         print(f"3D results saved to {json_3d_path}")
-        print(f"Annotated videos saved to {video1_output_path} and {video2_output_path}")
-        
-        # Optionally save 3D data in specific format
-        if output_3d:
-            self.save_3d_trajectories(tracking_3d_results, output_3d)
-        
-        return tracking_3d_results
     
-    def save_3d_trajectories(self, tracking_3d_results, output_path):
-        """Save 3D trajectories in CSV format"""
+    def _create_visualizations(self, tracking_3d_results: Dict, metrics: Dict) -> None:
+        """Create interactive visualizations."""
+        print("\nCreating visualizations...")
+        
+        # Create 3D interactive plot
+        plot_path = os.path.join(OUTPUT_DIR, INTERACTIVE_PLOT_FILENAME)
+        create_interactive_3d_plot(
+            tracking_3d_results, metrics, self.court_corners_3d, plot_path
+        )
+        
+        # Create metrics dashboard
+        dashboard_path = os.path.join(OUTPUT_DIR, METRICS_DASHBOARD_FILENAME)
+        from tracking.metrics import extract_trajectories
+        trajectories = extract_trajectories(tracking_3d_results)
+        create_metrics_dashboard(metrics, trajectories, dashboard_path)
+    
+    def _save_3d_trajectories_csv(self, tracking_3d_results: Dict, output_path: str) -> None:
+        """Save 3D trajectories in CSV format."""
         import csv
         
         with open(output_path, 'w', newline='') as csvfile:
-            fieldnames = ['frame', 'object', 'x', 'y', 'z', 'confidence']
+            fieldnames = ['frame', 'object', 'x', 'y', 'z']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             
@@ -293,88 +196,68 @@ class StereoTracker:
                         'object': obj_name,
                         'x': pos[0],
                         'y': pos[1],
-                        'z': pos[2],
-                        'confidence': obj_data['confidence']
+                        'z': pos[2]
                     })
         
         print(f"3D trajectories saved to {output_path}")
     
-    def visualize_3d_trajectories(self, tracking_3d_results, save_path=None):
-        """Visualize 3D trajectories using matplotlib"""
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        # Extract trajectories for each object
-        trajectories = {}
-        for frame_key, frame_data in tracking_3d_results.items():
-            frame_num = int(frame_key.split('_')[1])
-            for obj_name, obj_data in frame_data.items():
-                if obj_name not in trajectories:
-                    trajectories[obj_name] = {'frames': [], 'positions': []}
-                trajectories[obj_name]['frames'].append(frame_num)
-                trajectories[obj_name]['positions'].append(obj_data['position'])
-        
-        # Plot trajectories
-        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink']
-        for i, (obj_name, traj) in enumerate(trajectories.items()):
-            positions = np.array(traj['positions'])
-            ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], 
-                   color=colors[i % len(colors)], label=obj_name, linewidth=2)
-            
-            # Mark start and end points
-            if len(positions) > 0:
-                ax.scatter(positions[0, 0], positions[0, 1], positions[0, 2], 
-                          color=colors[i % len(colors)], s=100, marker='o')
-                ax.scatter(positions[-1, 0], positions[-1, 1], positions[-1, 2], 
-                          color=colors[i % len(colors)], s=100, marker='s')
-        
-        ax.set_xlabel('X (mm)')
-        ax.set_ylabel('Y (mm)')
-        ax.set_zlabel('Z (mm)')
-        ax.set_title('3D Object Trajectories')
-        ax.legend()
-        
-        current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"3D visualization saved to {save_path}_{current_timestamp}")
-        
-        plt.show()
+    def _print_summary(self, metrics: Dict) -> None:
+        """Print summary of player metrics."""
+        print("\n=== Summary of Player Metrics ===")
+        for player, player_metrics in metrics.items():
+            print(f"\n{player}:")
+            print(f"  - Total ground distance: {player_metrics['total_ground_distance_m']:.2f} m")
+            print(f"  - Average ground speed: {player_metrics['avg_ground_speed_ms']:.2f} m/s")
+            print(f"  - Max ground speed: {player_metrics['max_ground_speed_ms']:.2f} m/s")
+            print(f"  - Coverage area: {player_metrics['coverage_area_m2']:.2f} m²")
+            print(f"  - Average height: {player_metrics['avg_height_m']:.2f} m")
+            print(f"  - Max height: {player_metrics['max_height_m']:.2f} m")
+            print(f"  - Direction changes: {player_metrics['direction_changes']}")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Run stereo YOLO tracking with 3D triangulation")
+    """Main entry point for the basketball tracking system."""
+    parser = argparse.ArgumentParser(
+        description="Basketball stereo tracking with 3D triangulation and interactive visualization"
+    )
     
-    # Video inputs
-    parser.add_argument("--video1", type=str, required=True, help="Path to left camera video")
-    parser.add_argument("--video2", type=str, required=True, help="Path to right camera video")
+    # Required arguments
+    parser.add_argument("--video1", type=str, required=True, 
+                       help="Path to camera 1 detection JSON")
+    parser.add_argument("--video2", type=str, required=True, 
+                       help="Path to camera 2 detection JSON")
+    parser.add_argument("--camparams1", type=str, required=True, 
+                       help="Path to camera 1 parameters JSON")
+    parser.add_argument("--camparams2", type=str, required=True, 
+                       help="Path to camera 2 parameters JSON")
     
-    # Model
-    parser.add_argument("--modelP", type=str, required=True, help="Path to YOLO model for players")
-    parser.add_argument("--modelB", type=str, required=True, help="Path to YOLO model for the ball")
-    
-    # Camera parameters
-    parser.add_argument("--camparams1", type=str, required=True, help="Path to camera 1 parameters JSON")
-    parser.add_argument("--camparams2", type=str, required=True, help="Path to camera 2 parameters JSON")
-    
-    # Optional outputs
-    parser.add_argument("--output_3d", type=str, help="Path to save 3D trajectories CSV")
-    parser.add_argument("--visualize", action="store_true", help="Generate 3D trajectory visualization")
+    # Optional arguments
+    parser.add_argument("--corners1", type=str, 
+                       help="Path to camera 1 court corners JSON")
+    parser.add_argument("--corners2", type=str, 
+                       help="Path to camera 2 court corners JSON")
+    parser.add_argument("--fps", type=int, default=DEFAULT_FPS, 
+                       help=f"Video frame rate (default: {DEFAULT_FPS})")
+    parser.add_argument("--output_3d", type=str, 
+                       help="Path to save 3D trajectories CSV")
     
     args = parser.parse_args()
     
-    # Initialize tracker
-    tracker = StereoTracker(
-        args.modelP,args.modelB, args.video1, args.video2, args.camparams1, args.camparams2
+    # Load all data
+    print("Loading data...")
+    data = load_stereo_data(
+        args.video1, args.video2, 
+        args.camparams1, args.camparams2,
+        args.corners1, args.corners2
     )
     
-    # Run tracking
-    tracking_3d_results = tracker.run_tracking(args.output_3d)
+    # Initialize and run tracker
+    tracker = StereoTracker(data, args.fps)
+    tracking_3d_results, metrics = tracker.run_tracking(args.output_3d)
     
-    # Optional visualization
-    if args.visualize:
-        output_dir = os.path.join("outputs", f"stereo_{os.path.splitext(os.path.basename(args.video1))[0]}_{os.path.splitext(os.path.basename(args.video2))[0]}")
-        viz_path = os.path.join(output_dir, "3d_trajectories.png")
-        tracker.visualize_3d_trajectories(tracking_3d_results, viz_path)
+    print("\nTracking complete!")
+    print(f"Results saved to: {OUTPUT_DIR}")
+
 
 if __name__ == "__main__":
     main()
