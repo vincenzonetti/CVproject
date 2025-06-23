@@ -33,8 +33,20 @@ def load_detections(detection_path: str) -> List[Dict[str, Dict]]:
     for key, value in params.items():
         frame_detections = {}
         
+        # Group detections by class_id to handle duplicates
+        detections_by_class = {}
         for detection in value:
             class_id = detection['class_id']
+            
+            # If we already have a detection for this class, keep the one with higher confidence
+            if class_id in detections_by_class:
+                if detection.get('conf', 0) > detections_by_class[class_id].get('conf', 0):
+                    detections_by_class[class_id] = detection
+            else:
+                detections_by_class[class_id] = detection
+        
+        # Process the filtered detections
+        for class_id, detection in detections_by_class.items():
             class_name = CLASSES[class_id]  # Convert to class name
             bbox = detection['bbox']
             
@@ -45,13 +57,13 @@ def load_detections(detection_path: str) -> List[Dict[str, Dict]]:
             
             frame_detections[class_name] = {
                 'bbox': bbox,
-                'center': [x_center_px, y_center_px]  # Pixel coordinates
+                'center': [x_center_px, y_center_px],
+                'confidence': detection.get('conf', 1.0)  # Store confidence if available
             }
         
         formatted_params.append(frame_detections)
 
     return formatted_params
-
 
 def load_camera_params(params_path: str) -> Dict[str, np.ndarray]:
     """

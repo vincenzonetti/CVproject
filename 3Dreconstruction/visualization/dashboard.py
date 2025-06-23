@@ -14,7 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def create_metrics_dashboard(metrics: Dict, trajectories: Dict, save_path: str) -> None:
+def create_metrics_dashboard(metrics: Dict, save_path: str) -> None:
     """
     Create a comprehensive metrics dashboard.
     

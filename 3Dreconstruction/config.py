@@ -78,3 +78,12 @@ METRICS_FILENAME = 'trajectory_metrics.json'
 INTERACTIVE_PLOT_FILENAME = 'interactive_3d_trajectories.html'
 METRICS_DASHBOARD_FILENAME = 'interactive_3d_trajectories_metrics.html'
 METRICS_CSV_FILENAME = 'interactive_3d_trajectories_metrics.csv'
+
+
+# In 3Dreconstruction/config.py
+
+# Add these constants for ball height scaling
+BALL_MIN_HEIGHT_M = 0.0      # Minimum ball height in meters
+BALL_MAX_HEIGHT_M = 4.5      # Maximum ball height in meters  
+BALL_TARGET_AVG_HEIGHT_M = 1.3  # Target average height for ball in meters
+BALL_FIRST_DETECTION_HEIGHT_M = 1.1

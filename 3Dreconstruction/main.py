@@ -29,6 +29,8 @@ from visualization.plot_3d import create_interactive_3d_plot
 from visualization.dashboard import create_metrics_dashboard
 
 
+# In 3Dreconstruction/main.py
+
 class StereoTracker:
     """Main class for stereo basketball tracking."""
     
@@ -62,89 +64,130 @@ class StereoTracker:
                 cam1_corners, cam2_corners
             )
         
-        # Initialize triangulator
+        # Initialize triangulator with both camera parameters
         self.triangulator = Triangulator(
-            self.P1, self.P2, self.cam1_params, self.H1, self.H2
+            self.P1, self.P2, self.cam1_params, self.cam2_params, self.H1, self.H2
         )
     
     def run_tracking(self, output_3d: Optional[str] = None) -> Tuple[Dict, Dict]:
         """
-        Run the complete tracking pipeline.
+        Run the complete tracking pipeline with two-pass ball height scaling.
         
         Args:
-            output_3d: Optional path to save 3D trajectories CSV
+            output_3d: Optional path to save 3D trajectories
             
         Returns:
             Tuple of (tracking_3d_results, metrics)
         """
-        # Setup output directory
+        print("Starting stereo tracking pipeline...")
+        
+        # Create output directory
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         
-        # Initialize results storage
-        tracking_2d_results = {}
+        # Match objects between cameras
+        matches, frame_map1, frame_map2 = match_objects(self.det1, self.det2)
+        
+        # Compute and print matching statistics
+        stats = compute_matching_statistics(matches, self.det1, self.det2)
+        print_matching_statistics(stats)
+        
+        # Save 2D tracking results
+        tracking_2d = {
+            'camera1': frame_map1,
+            'camera2': frame_map2,
+            'matches': matches
+        }
+        with open(os.path.join(OUTPUT_DIR, TRACKING_2D_FILENAME), 'w') as f:
+            json.dump(tracking_2d, f, indent=2)
+        
+        # FIRST PASS: Collect ball heights
+        print("\nFirst pass: Collecting ball heights...")
+        tracking_3d_temp = {}
+        
+        for frame_idx, match in enumerate(tqdm(matches, desc="First pass")):
+            tracking_3d_temp[f'frame_{frame_idx}'] = {}
+            
+            for obj_name, (idx1, idx2) in match.items():
+                if idx1 is None or idx2 is None:
+                    continue
+                
+                # Get 2D points
+                pt1 = self.det1[frame_idx][obj_name]['center']
+                pt2 = self.det2[frame_idx][obj_name]['center']
+                
+                # Triangulate with collect_only=True for first pass
+                points_3d = self.triangulator.triangulate_point(
+                    pt1, pt2, obj_name, collect_only=True
+                )
+                
+                tracking_3d_temp[f'frame_{frame_idx}'][obj_name] = {
+                    'position': points_3d.tolist(),
+                    'camera1_2d': pt1,
+                    'camera2_2d': pt2
+                }
+        
+        # Compute ball height scaling parameters
+        print("\nComputing ball height scaling parameters...")
+        self.triangulator.compute_ball_height_scaling()
+        
+        # SECOND PASS: Apply scaling and generate final results
+        print("\nSecond pass: Applying height scaling...")
         tracking_3d_results = {}
         
-        # Track statistics
-        matching_stats = compute_matching_statistics(self.det1, self.det2)
-        
-        # Main tracking loop
-        print("Processing frames...")
-        for frame_idx, (detection1, detection2) in enumerate(tqdm(zip(self.det1, self.det2))):
-            # Match objects between views
-            matches = match_objects(detection1, detection2)
+        for frame_idx, match in enumerate(tqdm(matches, desc="Second pass")):
+            tracking_3d_results[f'frame_{frame_idx}'] = {}
             
-            # Triangulate 3D positions
-            frame_3d = {}
-            for obj_name, match in matches.items():
-                try:
-                    pos_3d = self.triangulator.triangulate_point(
-                        match['pt1'], match['pt2'], obj_name
-                    )
-                    frame_3d[obj_name] = {'position': pos_3d.tolist()}
-                except Exception as e:
-                    print(f"Triangulation failed for {obj_name} at frame {frame_idx}: {e}")
-            
-            # Store results
-            frame_key = f"frame_{frame_idx}"
-            tracking_2d_results[frame_key] = {
-                'view1': detection1,
-                'view2': detection2,
-                'matches': matches
-            }
-            tracking_3d_results[frame_key] = frame_3d
-            
-            if frame_idx % 100 == 0 and frame_idx > 0:
-                print(f"Processed {frame_idx} frames...")
+            for obj_name, (idx1, idx2) in match.items():
+                if idx1 is None or idx2 is None:
+                    continue
+                
+                # Get 2D points
+                pt1 = self.det1[frame_idx][obj_name]['center']
+                pt2 = self.det2[frame_idx][obj_name]['center']
+                
+                # Triangulate with scaling applied (collect_only=False)
+                points_3d = self.triangulator.triangulate_point(
+                    pt1, pt2, obj_name, collect_only=False
+                )
+                
+                tracking_3d_results[f'frame_{frame_idx}'][obj_name] = {
+                    'position': points_3d.tolist(),
+                    'camera1_2d': pt1,
+                    'camera2_2d': pt2
+                }
         
-        # Print matching statistics
-        print_matching_statistics(matching_stats)
+        # Clean trajectories
+        tracking_3d_results = clean_trajectories(tracking_3d_results)
         
-        # Clean trajectories to remove false positives
-        print("\nCleaning trajectories...")
-        tracking_3d_results = clean_trajectories(tracking_3d_results, self.fps)
+        # Save 3D tracking results
+        with open(os.path.join(OUTPUT_DIR, TRACKING_3D_FILENAME), 'w') as f:
+            json.dump(tracking_3d_results, f, indent=2)
         
-        # Save results
-        self._save_results(tracking_2d_results, tracking_3d_results)
-        
-        # Calculate trajectory metrics
+        # Calculate metrics
         print("\nCalculating trajectory metrics...")
         metrics = calculate_trajectory_metrics(tracking_3d_results, self.fps)
         
         # Save metrics
-        metrics_path = os.path.join(OUTPUT_DIR, METRICS_FILENAME)
-        with open(metrics_path, "w") as f:
+        with open(os.path.join(OUTPUT_DIR, METRICS_FILENAME), 'w') as f:
             json.dump(metrics, f, indent=2)
-        print(f"Trajectory metrics saved to {metrics_path}")
         
         # Create visualizations
-        self._create_visualizations(tracking_3d_results, metrics)
+        print("\nCreating interactive 3D visualization...")
+        create_interactive_3d_plot(
+            tracking_3d_results, metrics, self.court_corners_3d,
+            os.path.join(OUTPUT_DIR, INTERACTIVE_PLOT_FILENAME)
+        )
         
-        # Optionally save 3D trajectories CSV
+        # Create metrics dashboard
+        print("Creating metrics dashboard...")
+        create_metrics_dashboard(
+            metrics,
+            os.path.join(OUTPUT_DIR, METRICS_DASHBOARD_FILENAME)
+        )
+        
+        # Save to CSV if requested
         if output_3d:
             self._save_3d_trajectories_csv(tracking_3d_results, output_3d)
-        
-        # Print summary
-        self._print_summary(metrics)
         
         return tracking_3d_results, metrics
     
