@@ -1,21 +1,15 @@
-"""
-3D triangulation utilities for stereo tracking.
-
-This module handles triangulation of 3D points from stereo correspondences
-and coordinate transformations to the basketball court system.
-"""
+# In 3Dreconstruction/tracking/triangulator.py
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, List
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import MAX_REASONABLE_HEIGHT_M, HEIGHT_SCALE_FACTOR,BALL_MAX_HEIGHT_M,BALL_MIN_HEIGHT_M,BALL_TARGET_AVG_HEIGHT_M,BALL_FIRST_DETECTION_HEIGHT_M
+from config import (MAX_REASONABLE_HEIGHT_M, HEIGHT_SCALE_FACTOR,
+                   BALL_FIRST_DETECTION_HEIGHT_M, BALL_MAX_HEIGHT_M)
 
-
-# In 3Dreconstruction/tracking/triangulator.py
 
 class Triangulator:
     """Handles 3D triangulation and coordinate transformations."""
@@ -41,12 +35,11 @@ class Triangulator:
         self.cam2_params = cam2_params
         self.H1 = H1
         self.H2 = H2
-        self.ball_raw_heights = []  # Store raw ball heights for later scaling
-        self.ball_height_scale = None  # Will be computed after first pass
-        self.ball_height_offset = None  # Will be computed after first pass
+        self.first_ball_height = None  # Will be set during scaling
+        self.ball_height_scale = None  # Will be computed after cleaning
+        self.ball_height_offset = None  # Will be computed after cleaning
     
-    def triangulate_point(self, pt1: list, pt2: list, obj_name: str, 
-                         collect_only: bool = False) -> np.ndarray:
+    def triangulate_point(self, pt1: list, pt2: list, obj_name: str) -> np.ndarray:
         """
         Triangulate 3D point from 2D correspondences.
         
@@ -54,7 +47,6 @@ class Triangulator:
             pt1: 2D point in camera 1 [x, y]
             pt2: 2D point in camera 2 [x, y]
             obj_name: Name of the object (used for special handling of 'Ball')
-            collect_only: If True, only collect data without scaling (first pass)
             
         Returns:
             3D point in court coordinates [X, Y, Z] where:
@@ -75,7 +67,7 @@ class Triangulator:
         # Transform to court coordinates if homographies available
         if self.H1 is not None and self.H2 is not None:
             points_3d = self._transform_to_court_coords(
-                pt1, pt2, points_3d_camera, obj_name, collect_only
+                pt1, pt2, points_3d_camera, obj_name
             )
         else:
             # No court transformation, return camera coordinates
@@ -83,50 +75,107 @@ class Triangulator:
         
         return points_3d
     
-    def compute_ball_height_scaling(self):
+    def compute_ball_height_scaling(self, tracking_3d_results: Dict) -> None:
         """
-        Compute scaling parameters for ball heights to achieve:
-        - First detected height: 1.1 meters
-        - Maximum detected height: 4.5 meters
-        - Smooth scaling for all other heights
+        Compute scaling parameters for ball heights from cleaned trajectories.
+        
+        Args:
+            tracking_3d_results: Cleaned 3D tracking results
         """
-        if not self.ball_raw_heights:
-            print("Warning: No ball heights collected for scaling")
+        # Extract all ball heights from cleaned trajectories
+        ball_heights = []
+        frame_numbers = []
+        
+        for frame_key in sorted(tracking_3d_results.keys(), 
+                               key=lambda x: int(x.split('_')[1])):
+            if 'Ball' in tracking_3d_results[frame_key]:
+                height = tracking_3d_results[frame_key]['Ball']['position'][1]
+                ball_heights.append(height)
+                frame_numbers.append(int(frame_key.split('_')[1]))
+        
+        if not ball_heights:
+            print("Warning: No ball heights found in cleaned trajectories")
             return
         
-        raw_heights = np.array(self.ball_raw_heights)
+        ball_heights = np.array(ball_heights)
         
         # Get first and maximum heights
-        self.first_ball_height = raw_heights[0]  # First detected height
-        max_raw_height = np.max(raw_heights)
+        self.first_ball_height = ball_heights[0]
+        max_ball_height = np.max(ball_heights)
         
         # Compute scaling factor
-        # We want: first_height -> 1.1m and max_height -> 4.5m
-        if max_raw_height != self.first_ball_height:
-            # Scale factor based on the range from first to max
-            height_range_raw = max_raw_height - self.first_ball_height
+        if max_ball_height != self.first_ball_height:
+            height_range_raw = max_ball_height - self.first_ball_height
             height_range_target = BALL_MAX_HEIGHT_M - BALL_FIRST_DETECTION_HEIGHT_M
             self.ball_height_scale = height_range_target / height_range_raw
         else:
-            # All heights are the same, no scaling needed
             self.ball_height_scale = 1.0
         
+        # Set offset to 0 (not used in this scaling method)
+        self.ball_height_offset = 0.0
+        
         # Verify the scaling
-        print(f"\nBall height scaling computed:")
+        print(f"\nBall height scaling computed from cleaned trajectories:")
+        print(f"  Total ball detections: {len(ball_heights)}")
         print(f"  First raw height: {self.first_ball_height:.3f}m -> {BALL_FIRST_DETECTION_HEIGHT_M}m")
-        print(f"  Max raw height: {max_raw_height:.3f}m -> {BALL_MAX_HEIGHT_M}m")
+        print(f"  Max raw height: {max_ball_height:.3f}m -> {BALL_MAX_HEIGHT_M}m")
         print(f"  Scale factor: {self.ball_height_scale:.3f}")
         
-        # Show some example scaled heights
-        example_heights = [np.min(raw_heights), np.median(raw_heights), np.mean(raw_heights)]
-        print(f"  Examples:")
-        for h in example_heights:
-            scaled = BALL_FIRST_DETECTION_HEIGHT_M + (h - self.first_ball_height) * self.ball_height_scale
-            print(f"    {h:.3f}m -> {scaled:.3f}m")
+        # Show distribution
+        print(f"  Height distribution:")
+        print(f"    Min: {np.min(ball_heights):.3f}m")
+        print(f"    Mean: {np.mean(ball_heights):.3f}m")
+        print(f"    Median: {np.median(ball_heights):.3f}m")
+        print(f"    Max: {np.max(ball_heights):.3f}m")
+    
+    def apply_ball_height_scaling(self, tracking_3d_results: Dict) -> Dict:
+        """
+        Apply the computed scaling to all ball positions in the tracking results.
+        
+        Args:
+            tracking_3d_results: Original tracking results
             
+        Returns:
+            Updated tracking results with scaled ball heights
+        """
+        if self.ball_height_scale is None or self.first_ball_height is None:
+            print("Warning: Ball height scaling not computed, returning original results")
+            return tracking_3d_results
+        
+        # Create a copy to avoid modifying the original
+        scaled_results = {}
+        
+        for frame_key, frame_data in tracking_3d_results.items():
+            scaled_results[frame_key] = {}
+            
+            for obj_name, obj_data in frame_data.items():
+                if obj_name == 'Ball':
+                    # Apply scaling to ball height
+                    position = obj_data['position'].copy()
+                    raw_height = position[1]
+                    
+                    # Apply scaling formula
+                    scaled_height = BALL_FIRST_DETECTION_HEIGHT_M + \
+                                  (raw_height - self.first_ball_height) * self.ball_height_scale
+                    
+                    # Ensure within bounds
+                    scaled_height = np.clip(scaled_height, 0.0, BALL_MAX_HEIGHT_M)
+                    position[1] = scaled_height
+                    
+                    # Store updated data
+                    
+                    scaled_results[frame_key][obj_name] = {
+                        'position': position,
+                    }
+                else:
+                    # Copy non-ball objects as-is
+                    scaled_results[frame_key][obj_name] = obj_data
+        
+        return scaled_results
+    
     def _transform_to_court_coords(self, pt1: list, pt2: list, 
                                    points_3d_camera: np.ndarray, 
-                                   obj_name: str, collect_only: bool = False) -> np.ndarray:
+                                   obj_name: str) -> np.ndarray:
         """
         Transform 3D point from camera coordinates to court coordinates.
         
@@ -135,7 +184,6 @@ class Triangulator:
             pt2: 2D point in camera 2
             points_3d_camera: 3D point in camera coordinates
             obj_name: Object name for special handling
-            collect_only: If True, only collect data without scaling
             
         Returns:
             3D point in court coordinates [X, Y, Z]
@@ -156,25 +204,8 @@ class Triangulator:
         
         # Basketball convention: X (width), Y (height), Z (depth)
         if obj_name == 'Ball':
-            if collect_only:
-                # First pass: collect raw heights
-                self.ball_raw_heights.append(abs(height))
-                y_coord = abs(height)  # Use raw height for now
-            else:
-                # Second pass: apply scaling
-                if self.ball_height_scale is not None and self.ball_height_offset is not None:
-                    # Apply the computed scaling
-                    raw_height = abs(height)
-                    # Find the min height from collected data for normalization
-                    min_height = min(self.ball_raw_heights)
-                    scaled_height = (raw_height - min_height) * self.ball_height_scale + BALL_MIN_HEIGHT_M
-                    y_coord = scaled_height + self.ball_height_offset
-                    
-                    # Ensure we stay within bounds
-                    y_coord = np.clip(y_coord, BALL_MIN_HEIGHT_M, BALL_MAX_HEIGHT_M)
-                else:
-                    # Fallback if scaling not computed
-                    y_coord = abs(height)
+            # Store raw height without scaling (scaling will be done later)
+            y_coord = abs(height)
         else:
             y_coord = 0.0  # Players on the ground
         
@@ -184,7 +215,7 @@ class Triangulator:
     def _extract_height_stereo(self, points_3d_camera: np.ndarray, 
                                pt1: list, pt2: list) -> float:
         """
-        Extract and scale height from camera coordinates using stereo information.
+        Extract height from camera coordinates using stereo information.
         
         Args:
             points_3d_camera: 3D point in camera coordinates
@@ -205,7 +236,6 @@ class Triangulator:
         points_3d_world1 = R1.T @ (points_3d_camera - t1)
         
         # Also compute using camera 2 for comparison
-        # First need to transform the 3D point to camera 2's coordinate system
         points_3d_cam2 = R2 @ points_3d_world1 + t2
         points_3d_world2 = R2.T @ (points_3d_cam2 - t2)
         
@@ -219,6 +249,7 @@ class Triangulator:
             z_world *= HEIGHT_SCALE_FACTOR
         
         return z_world
+
 
 def compute_projection_matrix(cam_params: dict) -> np.ndarray:
     """

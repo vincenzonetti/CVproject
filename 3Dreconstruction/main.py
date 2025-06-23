@@ -71,7 +71,7 @@ class StereoTracker:
     
     def run_tracking(self, output_3d: Optional[str] = None) -> Tuple[Dict, Dict]:
         """
-        Run the complete tracking pipeline with two-pass ball height scaling.
+        Run the complete tracking pipeline with post-cleaning ball height scaling.
         
         Args:
             output_3d: Optional path to save 3D trajectories
@@ -84,7 +84,7 @@ class StereoTracker:
         # Create output directory
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         
-        # Match objects between cameras
+        # Match objects between cameras across all frames
         matches, frame_map1, frame_map2 = match_objects(self.det1, self.det2)
         
         # Compute and print matching statistics
@@ -100,64 +100,50 @@ class StereoTracker:
         with open(os.path.join(OUTPUT_DIR, TRACKING_2D_FILENAME), 'w') as f:
             json.dump(tracking_2d, f, indent=2)
         
-        # FIRST PASS: Collect ball heights
-        print("\nFirst pass: Collecting ball heights...")
-        tracking_3d_temp = {}
+        # SINGLE PASS: Triangulate with raw heights
+        print("\nTriangulating 3D positions...")
+        tracking_3d_raw = {}
         
-        for frame_idx, match in enumerate(tqdm(matches, desc="First pass")):
-            tracking_3d_temp[f'frame_{frame_idx}'] = {}
+        for frame_idx, frame_matches in enumerate(tqdm(matches, desc="Triangulating")):
+            tracking_3d_raw[f'frame_{frame_idx}'] = {}
             
-            for obj_name, (idx1, idx2) in match.items():
+            for obj_name, (idx1, idx2) in frame_matches.items():
+                # Skip if object not seen by both cameras
                 if idx1 is None or idx2 is None:
                     continue
                 
+                # Get detections for this frame
+                det1_frame = self.det1[frame_idx]
+                det2_frame = self.det2[frame_idx]
+                
+                # Skip if object not in both frames
+                if obj_name not in det1_frame or obj_name not in det2_frame:
+                    continue
+                
                 # Get 2D points
-                pt1 = self.det1[frame_idx][obj_name]['center']
-                pt2 = self.det2[frame_idx][obj_name]['center']
+                pt1 = det1_frame[obj_name]['center']
+                pt2 = det2_frame[obj_name]['center']
                 
-                # Triangulate with collect_only=True for first pass
-                points_3d = self.triangulator.triangulate_point(
-                    pt1, pt2, obj_name, collect_only=True
-                )
+                # Triangulate (no scaling applied yet)
+                points_3d = self.triangulator.triangulate_point(pt1, pt2, obj_name)
                 
-                tracking_3d_temp[f'frame_{frame_idx}'][obj_name] = {
+                tracking_3d_raw[f'frame_{frame_idx}'][obj_name] = {
                     'position': points_3d.tolist(),
                     'camera1_2d': pt1,
                     'camera2_2d': pt2
                 }
         
-        # Compute ball height scaling parameters
-        print("\nComputing ball height scaling parameters...")
-        self.triangulator.compute_ball_height_scaling()
+        # Clean trajectories BEFORE scaling
+        print("\nCleaning trajectories...")
+        tracking_3d_cleaned = clean_trajectories(tracking_3d_raw)
         
-        # SECOND PASS: Apply scaling and generate final results
-        print("\nSecond pass: Applying height scaling...")
-        tracking_3d_results = {}
+        # Compute ball height scaling from cleaned data
+        print("\nComputing ball height scaling from cleaned trajectories...")
+        self.triangulator.compute_ball_height_scaling(tracking_3d_cleaned)
         
-        for frame_idx, match in enumerate(tqdm(matches, desc="Second pass")):
-            tracking_3d_results[f'frame_{frame_idx}'] = {}
-            
-            for obj_name, (idx1, idx2) in match.items():
-                if idx1 is None or idx2 is None:
-                    continue
-                
-                # Get 2D points
-                pt1 = self.det1[frame_idx][obj_name]['center']
-                pt2 = self.det2[frame_idx][obj_name]['center']
-                
-                # Triangulate with scaling applied (collect_only=False)
-                points_3d = self.triangulator.triangulate_point(
-                    pt1, pt2, obj_name, collect_only=False
-                )
-                
-                tracking_3d_results[f'frame_{frame_idx}'][obj_name] = {
-                    'position': points_3d.tolist(),
-                    'camera1_2d': pt1,
-                    'camera2_2d': pt2
-                }
-        
-        # Clean trajectories
-        tracking_3d_results = clean_trajectories(tracking_3d_results)
+        # Apply scaling to get final results
+        print("\nApplying ball height scaling...")
+        tracking_3d_results = self.triangulator.apply_ball_height_scaling(tracking_3d_cleaned)
         
         # Save 3D tracking results
         with open(os.path.join(OUTPUT_DIR, TRACKING_3D_FILENAME), 'w') as f:
