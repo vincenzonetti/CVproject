@@ -209,7 +209,7 @@ def configure_3d_layout(fig: go.Figure, num_court_traces: int) -> None:
                 zerolinecolor='rgb(255, 255, 255)',
                 showbackground=True,
                 backgroundcolor='rgb(230, 230,230)',
-                range=[0, 4]  # Limit height range
+                range=[0, 6]  # Limit height range
             ),
             zaxis=dict(
                 title=AXIS_LABELS['z'],

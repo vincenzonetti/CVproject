@@ -105,10 +105,10 @@ def clean_single_trajectory(frames: List[int], positions: List[List[float]],
     median_velocity = np.median(non_zero_velocities)
     
     # Find outliers (velocities > 4 * median)
-    outlier_threshold = 3 * median_velocity
+    outlier_threshold = 1*median_velocity
     
     # Also check for teleportation (sudden jumps)
-    teleport_threshold = 2.0  # meters - adjust as needed
+    teleport_threshold = 1.0  # meters - adjust as needed
     
     # Mark points to keep
     keep_points = np.ones(len(positions), dtype=bool)
@@ -123,6 +123,7 @@ def clean_single_trajectory(frames: List[int], positions: List[List[float]],
         # Check teleportation
         displacement = np.linalg.norm(positions[i] - positions[i-1])
         teleport_threshold = 0.05 if obj_name == 'Red_2' else teleport_threshold
+        teleport_threshold = 0.05 if obj_name == 'Ball' else teleport_threshold
         if displacement > teleport_threshold:
             keep_points[i] = False
             #print(f"Removing {obj_name} frame {frames[i]}: teleportation {displacement:.2f} m > {teleport_threshold:.2f} m")

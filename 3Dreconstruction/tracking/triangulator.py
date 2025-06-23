@@ -69,12 +69,13 @@ class Triangulator:
             points_3d = self._transform_to_court_coords(
                 pt1, pt2, points_3d_camera, obj_name
             )
-        else:
+            return points_3d
             
+        if obj_name == 'Ball':
             # No court transformation, return camera coordinates
             points_3d = points_3d_camera.flatten()
             points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
-            
+        
         
         return points_3d
     
@@ -95,7 +96,7 @@ class Triangulator:
                 height = tracking_3d_results[frame_key]['Ball']['position'][1]
                 ball_heights.append(height)
                 frame_numbers.append(int(frame_key.split('_')[1]))
-        breakpoint()
+        
         if not ball_heights:
             print("Warning: No ball heights found in cleaned trajectories")
             return
@@ -165,12 +166,14 @@ class Triangulator:
                     # Ensure within bounds
                     scaled_height = np.clip(scaled_height, 0.0, BALL_MAX_HEIGHT_M)
                     position[1] = scaled_height
-                    
+                    position[0]/=1000
+                    position[2]/=1100
                     # Store updated data
                     
                     scaled_results[frame_key][obj_name] = {
                         'position': position,
                     }
+                    
                 else:
                     # Copy non-ball objects as-is
                     scaled_results[frame_key][obj_name] = obj_data
@@ -205,14 +208,7 @@ class Triangulator:
         
         # Get height from triangulated point using both cameras
         
-        
-        # Basketball convention: X (width), Y (height), Z (depth)
-        if obj_name == 'Ball':
-            
-            height = self._extract_height_stereo(points_3d_camera, pt1, pt2)
-            y_coord = max(0,height)
-        else:
-            y_coord = 0.0  # Players on the ground
+        y_coord = 0.0  # Players on the ground
         
         # Create final position: X, Y (height), Z (depth)
         return np.array([court_xy[0], y_coord, court_xy[1]])
