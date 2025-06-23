@@ -9,6 +9,7 @@ and visualization generation.
 import argparse
 import os
 import json
+import csv
 from datetime import datetime
 from tqdm import tqdm
 from typing import Dict, Tuple, Optional
@@ -28,8 +29,6 @@ from utils.court import setup_court_transformation
 from visualization.plot_3d import create_interactive_3d_plot
 from visualization.dashboard import create_metrics_dashboard
 
-
-# In 3Dreconstruction/main.py
 
 class StereoTracker:
     """Main class for stereo basketball tracking."""
@@ -99,8 +98,7 @@ class StereoTracker:
         }
         with open(os.path.join(OUTPUT_DIR, TRACKING_2D_FILENAME), 'w') as f:
             json.dump(tracking_2d, f, indent=2)
-        
-        # SINGLE PASS: Triangulate with raw heights
+          # Triangulate 3D positions
         print("\nTriangulating 3D positions...")
         tracking_3d_raw = {}
         
@@ -116,7 +114,7 @@ class StereoTracker:
                 det1_frame = self.det1[frame_idx]
                 det2_frame = self.det2[frame_idx]
                 
-                # Skip if object not in both frames
+                # Skip if object not in both frames (additional safety check)
                 if obj_name not in det1_frame or obj_name not in det2_frame:
                     continue
                 
@@ -126,9 +124,6 @@ class StereoTracker:
                 
                 # Triangulate (no scaling applied yet)
                 points_3d = self.triangulator.triangulate_point(pt1, pt2, obj_name)
-                
-                #if obj_name == 'Ball':
-                #    breakpoint()
                 
                 tracking_3d_raw[f'frame_{frame_idx}'][obj_name] = {
                     'position': points_3d.tolist(),
@@ -171,48 +166,19 @@ class StereoTracker:
         print("Creating metrics dashboard...")
         create_metrics_dashboard(
             metrics,
-            os.path.join(OUTPUT_DIR, METRICS_DASHBOARD_FILENAME)
-        )
+            os.path.join(OUTPUT_DIR, METRICS_DASHBOARD_FILENAME)        )
         
         # Save to CSV if requested
         if output_3d:
             self._save_3d_trajectories_csv(tracking_3d_results, output_3d)
         
+        # Print summary
+        self._print_summary(metrics)
+        
         return tracking_3d_results, metrics
-    
-    def _save_results(self, tracking_2d_results: Dict, tracking_3d_results: Dict) -> None:
-        """Save tracking results to JSON files."""
-        # Save 2D results
-        json_2d_path = os.path.join(OUTPUT_DIR, TRACKING_2D_FILENAME)
-        with open(json_2d_path, "w") as f:
-            json.dump(tracking_2d_results, f, indent=2)
-        print(f"\n2D results saved to {json_2d_path}")
-        
-        # Save 3D results
-        json_3d_path = os.path.join(OUTPUT_DIR, TRACKING_3D_FILENAME)
-        with open(json_3d_path, "w") as f:
-            json.dump(tracking_3d_results, f, indent=2)
-        print(f"3D results saved to {json_3d_path}")
-    
-    def _create_visualizations(self, tracking_3d_results: Dict, metrics: Dict) -> None:
-        """Create interactive visualizations."""
-        print("\nCreating visualizations...")
-        
-        # Create 3D interactive plot
-        plot_path = os.path.join(OUTPUT_DIR, INTERACTIVE_PLOT_FILENAME)
-        create_interactive_3d_plot(
-            tracking_3d_results, metrics, self.court_corners_3d, plot_path
-        )
-        
-        # Create metrics dashboard
-        dashboard_path = os.path.join(OUTPUT_DIR, METRICS_DASHBOARD_FILENAME)
-        from tracking.metrics import extract_trajectories
-        trajectories = extract_trajectories(tracking_3d_results)
-        create_metrics_dashboard(metrics, trajectories, dashboard_path)
     
     def _save_3d_trajectories_csv(self, tracking_3d_results: Dict, output_path: str) -> None:
         """Save 3D trajectories in CSV format."""
-        import csv
         
         with open(output_path, 'w', newline='') as csvfile:
             fieldnames = ['frame', 'object', 'x', 'y', 'z']

@@ -13,13 +13,12 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def clean_trajectories(tracking_3d_results: Dict, fps: float = 25) -> Dict:
+def clean_trajectories(tracking_3d_results: Dict) -> Dict:
     """
     Clean trajectories by removing outliers and interpolating missing points.
     
     Args:
         tracking_3d_results: Dictionary with frame-wise 3D positions
-        fps: Frames per second for speed calculations
         
     Returns:
         Cleaned tracking results with outliers removed and interpolated
@@ -29,12 +28,10 @@ def clean_trajectories(tracking_3d_results: Dict, fps: float = 25) -> Dict:
     
     # Clean each trajectory
     cleaned_trajectories = {}
-    for obj_name, traj_data in trajectories.items():
-        # Clean player trajectories
+    for obj_name, traj_data in trajectories.items():        # Clean player trajectories
         cleaned_traj = clean_single_trajectory(
             traj_data['frames'], 
             traj_data['positions'], 
-            fps, 
             obj_name
         )
         if cleaned_traj:
@@ -62,14 +59,13 @@ def extract_trajectories_with_frames(tracking_3d_results: Dict) -> Dict:
 
 
 def clean_single_trajectory(frames: List[int], positions: List[List[float]], 
-                           fps: float, obj_name: str) -> Dict:
+                           obj_name: str) -> Dict:
     """
     Clean a single trajectory by removing outliers.
     
     Args:
         frames: List of frame numbers
         positions: List of 3D positions
-        fps: Frames per second
         obj_name: Name of the object for debugging
         
     Returns:
@@ -82,51 +78,20 @@ def clean_single_trajectory(frames: List[int], positions: List[List[float]],
     frames = np.array(frames)
     positions = np.array(positions)
     
-    # Calculate velocities between consecutive points
-    velocities = []
-    for i in range(1, len(positions)):
-        time_diff = (frames[i] - frames[i-1]) / fps
-        if time_diff > 0:
-            # Ground velocity (X-Z plane only for players)
-            displacement = positions[i] - positions[i-1]
-            ground_displacement = np.sqrt(displacement[0]**2 + displacement[2]**2)
-            velocity = ground_displacement / time_diff
-            velocities.append(velocity)
-        else:
-            velocities.append(0)
-    
-    velocities = np.array(velocities)
-    
-    # Calculate median velocity (excluding zeros)
-    non_zero_velocities = velocities[velocities > 0]
-    if len(non_zero_velocities) == 0:
-        return {'frames': frames.tolist(), 'positions': positions.tolist()}
-    
-    median_velocity = np.median(non_zero_velocities)
-    
-    # Find outliers (velocities > 4 * median)
-    outlier_threshold = 1*median_velocity
-    
-    # Also check for teleportation (sudden jumps)
-    teleport_threshold = 1.0  # meters - adjust as needed
+    # Check for teleportation (sudden jumps in displacement)
+    teleport_threshold = 0.4  # meters - adjust as needed
     
     # Mark points to keep
     keep_points = np.ones(len(positions), dtype=bool)
     
     # Check each transition
     for i in range(1, len(positions)):
-        # Check velocity
-        if i-1 < len(velocities) and velocities[i-1]> outlier_threshold:
-            keep_points[i] = False
-            #print(f"Removing {obj_name} frame {frames[i]}: velocity {velocities[i-1]:.2f} m/s > {outlier_threshold:.2f} m/s")
-        
-        # Check teleportation
+        # Check displacement between consecutive points
         displacement = np.linalg.norm(positions[i] - positions[i-1])
-        teleport_threshold = 0.05 if obj_name == 'Red_2' else teleport_threshold
-        teleport_threshold = 0.05 if obj_name == 'Ball' else teleport_threshold
+        teleport_threshold = 1000 if obj_name == 'Ball' else teleport_threshold
         if displacement > teleport_threshold:
             keep_points[i] = False
-            #print(f"Removing {obj_name} frame {frames[i]}: teleportation {displacement:.2f} m > {teleport_threshold:.2f} m")
+            print(f"Removing {obj_name} frame {frames[i]}: teleportation {displacement:.2f} m > {teleport_threshold:.2f} m")
     
     # Keep at least 3 points for interpolation
     
