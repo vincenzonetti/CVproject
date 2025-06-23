@@ -52,7 +52,7 @@ DIRECTION_CHANGE_THRESHOLD_RAD = 0.785398  # 45 degrees in radians
 MIN_TRAJECTORY_POINTS = 2  # Minimum points needed for trajectory
 
 # Height constraints
-MAX_REASONABLE_HEIGHT_M = 10.0  # Maximum reasonable height in meters
+MAX_REASONABLE_HEIGHT_M = 4.5  # Maximum reasonable height in meters
 HEIGHT_SCALE_FACTOR = 0.001  # Convert mm to m if needed
 
 # Axis convention for basketball court

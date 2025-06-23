@@ -118,14 +118,14 @@ def clean_single_trajectory(frames: List[int], positions: List[List[float]],
         # Check velocity
         if i-1 < len(velocities) and velocities[i-1]> outlier_threshold:
             keep_points[i] = False
-            print(f"Removing {obj_name} frame {frames[i]}: velocity {velocities[i-1]:.2f} m/s > {outlier_threshold:.2f} m/s")
+            #print(f"Removing {obj_name} frame {frames[i]}: velocity {velocities[i-1]:.2f} m/s > {outlier_threshold:.2f} m/s")
         
         # Check teleportation
         displacement = np.linalg.norm(positions[i] - positions[i-1])
         teleport_threshold = 0.05 if obj_name == 'Red_2' else teleport_threshold
         if displacement > teleport_threshold:
             keep_points[i] = False
-            print(f"Removing {obj_name} frame {frames[i]}: teleportation {displacement:.2f} m > {teleport_threshold:.2f} m")
+            #print(f"Removing {obj_name} frame {frames[i]}: teleportation {displacement:.2f} m > {teleport_threshold:.2f} m")
     
     # Keep at least 3 points for interpolation
     

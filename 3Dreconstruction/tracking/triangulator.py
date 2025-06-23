@@ -65,13 +65,16 @@ class Triangulator:
         points_3d_camera = points_4d[:3] / points_4d[3]
         
         # Transform to court coordinates if homographies available
-        if self.H1 is not None and self.H2 is not None:
+        if self.H1 is not None and self.H2 is not None and obj_name is not 'Ball':
             points_3d = self._transform_to_court_coords(
                 pt1, pt2, points_3d_camera, obj_name
             )
         else:
+            
             # No court transformation, return camera coordinates
             points_3d = points_3d_camera.flatten()
+            points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
+            
         
         return points_3d
     
@@ -92,10 +95,11 @@ class Triangulator:
                 height = tracking_3d_results[frame_key]['Ball']['position'][1]
                 ball_heights.append(height)
                 frame_numbers.append(int(frame_key.split('_')[1]))
-        
+        breakpoint()
         if not ball_heights:
             print("Warning: No ball heights found in cleaned trajectories")
             return
+        
         
         ball_heights = np.array(ball_heights)
         
@@ -200,12 +204,13 @@ class Triangulator:
         court_xy = (pt1_court + pt2_court) / 2
         
         # Get height from triangulated point using both cameras
-        height = self._extract_height_stereo(points_3d_camera, pt1, pt2)
+        
         
         # Basketball convention: X (width), Y (height), Z (depth)
         if obj_name == 'Ball':
-            # Store raw height without scaling (scaling will be done later)
-            y_coord = abs(height)
+            
+            height = self._extract_height_stereo(points_3d_camera, pt1, pt2)
+            y_coord = max(0,height)
         else:
             y_coord = 0.0  # Players on the ground
         
@@ -245,8 +250,10 @@ class Triangulator:
         z_world = (z_world1 + z_world2) / 2
         
         # Scale if necessary
+        
         if abs(z_world) > MAX_REASONABLE_HEIGHT_M:
             z_world *= HEIGHT_SCALE_FACTOR
+            z_world/=4
         
         return z_world
 

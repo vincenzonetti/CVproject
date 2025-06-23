@@ -127,6 +127,9 @@ class StereoTracker:
                 # Triangulate (no scaling applied yet)
                 points_3d = self.triangulator.triangulate_point(pt1, pt2, obj_name)
                 
+                #if obj_name == 'Ball':
+                #    breakpoint()
+                
                 tracking_3d_raw[f'frame_{frame_idx}'][obj_name] = {
                     'position': points_3d.tolist(),
                     'camera1_2d': pt1,
