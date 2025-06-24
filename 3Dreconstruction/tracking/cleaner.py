@@ -101,7 +101,16 @@ def clean_single_trajectory(frames: List[int], positions: List[List[float]],
     
     # Extract clean points
     clean_frames = frames[keep_points]
-    clean_positions = positions[keep_points]
+    clean_positions = positions[keep_points]    # Special handling for Red_0 (class id 1): check for large gaps
+    if obj_name == 'Red_0':
+        max_gap = check_max_gap_between_detections(clean_frames)
+        print(f"Debug: {obj_name} max gap between detections: {max_gap} frames")
+        if max_gap > 100:
+            print(f"Warning: {obj_name} has gap of {max_gap} frames > 100, skipping interpolation")
+            return {
+                'frames': clean_frames.tolist(),
+                'positions': clean_positions.tolist()
+            }
     
     # Interpolate to fill gaps
     interpolated_data = interpolate_trajectory(
@@ -210,3 +219,23 @@ def rebuild_tracking_results(cleaned_trajectories: Dict) -> Dict:
             new_results[frame_key] = frame_data
     
     return new_results
+
+
+def check_max_gap_between_detections(frames: np.ndarray) -> int:
+    """
+    Check the maximum gap between consecutive detections.
+    
+    Args:
+        frames: Array of frame numbers where detections occur
+        
+    Returns:
+        Maximum gap in frames between consecutive detections
+    """
+    if len(frames) < 2:
+        return 0
+    
+    # Calculate gaps between consecutive frames
+    gaps = np.diff(frames)
+    
+    # Return the maximum gap
+    return int(np.max(gaps))
