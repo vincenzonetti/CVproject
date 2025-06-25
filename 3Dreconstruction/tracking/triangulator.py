@@ -65,17 +65,21 @@ class Triangulator:
         points_3d_camera = points_4d[:3] / points_4d[3]
         
         # Transform to court coordinates if homographies available
-        if self.H1 is not None and self.H2 is not None and obj_name is not 'Ball':
-            points_3d = self._transform_to_court_coords(
-                pt1, pt2, points_3d_camera, obj_name
-            )
-            return points_3d
+        #if self.H1 is not None and self.H2 is not None and obj_name is not 'Ball':
+        #    points_3d = self._transform_to_court_coords(
+        #        pt1, pt2, points_3d_camera, obj_name
+        #    )
+        #    return points_3d
             
         if obj_name == 'Ball':
             # No court transformation, return camera coordinates
             points_3d = points_3d_camera.flatten()
             points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
-        
+        else:
+            points_3d = points_3d_camera.flatten()
+            points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
+            for i in range(len(points_3d)):
+                points_3d[i]/=1000
         
         return points_3d
     
