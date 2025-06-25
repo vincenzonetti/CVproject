@@ -140,49 +140,31 @@ def interpolate_trajectory(clean_frames: np.ndarray, clean_positions: np.ndarray
     # Interpolate each dimension separately
     interpolated_positions = []
     
-    try:
-        # Use cubic spline interpolation if enough points
-        if len(clean_frames) >= 4:
-            # Cubic spline for each dimension
-            interp_x = interpolate.CubicSpline(clean_frames, clean_positions[:, 0])
-            interp_y = interpolate.CubicSpline(clean_frames, clean_positions[:, 1])
-            interp_z = interpolate.CubicSpline(clean_frames, clean_positions[:, 2])
-        else:
-            # Linear interpolation if too few points
-            interp_x = interpolate.interp1d(clean_frames, clean_positions[:, 0], 
-                                          kind='linear', fill_value='extrapolate')
-            interp_y = interpolate.interp1d(clean_frames, clean_positions[:, 1], 
-                                          kind='linear', fill_value='extrapolate')
-            interp_z = interpolate.interp1d(clean_frames, clean_positions[:, 2], 
-                                          kind='linear', fill_value='extrapolate')
+    # Cubic spline for each dimension
+    interp_x = interpolate.CubicSpline(clean_frames, clean_positions[:, 0])
+    interp_y = interpolate.CubicSpline(clean_frames, clean_positions[:, 1])
+    interp_z = interpolate.CubicSpline(clean_frames, clean_positions[:, 2])
+    
+    
+    # Interpolate for all frames
+    for frame in all_frames:
+        if frame < clean_frames[0] or frame > clean_frames[-1]:
+            # Skip extrapolation beyond data range
+            continue
         
-        # Interpolate for all frames
-        for frame in all_frames:
-            if frame < clean_frames[0] or frame > clean_frames[-1]:
-                # Skip extrapolation beyond data range
-                continue
-            
-            x = float(interp_x(frame))
-            y = float(interp_y(frame))
-            z = float(interp_z(frame))
-            interpolated_positions.append([x, y, z])
-        
-        # Only keep frames within interpolation range
-        valid_frames = all_frames[(all_frames >= clean_frames[0]) & 
-                                 (all_frames <= clean_frames[-1])]
-        
-        return {
-            'frames': valid_frames.tolist(),
-            'positions': interpolated_positions
-        }
-        
-    except Exception as e:
-        print(f"Interpolation failed: {e}")
-        # Return original clean data if interpolation fails
-        return {
-            'frames': clean_frames.tolist(),
-            'positions': clean_positions.tolist()
-        }
+        x = float(interp_x(frame))
+        y = float(interp_y(frame))
+        z = float(interp_z(frame))
+        interpolated_positions.append([x, y, z])
+    
+    # Only keep frames within interpolation range
+    valid_frames = all_frames[(all_frames >= clean_frames[0]) & 
+                             (all_frames <= clean_frames[-1])]
+    
+    return {
+        'frames': valid_frames.tolist(),
+        'positions': interpolated_positions
+    }
 
 
 def rebuild_tracking_results(cleaned_trajectories: Dict) -> Dict:
