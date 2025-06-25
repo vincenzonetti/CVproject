@@ -53,19 +53,17 @@ class StereoTracker:
         
         # Setup court transformation if corners available
         self.court_corners_3d = None
-        self.H1 = None
-        self.H2 = None
         
         if 'cam1_real_corners' in data and 'cam2_real_corners' in data:
             cam1_corners = (data['cam1_real_corners'], data['cam1_img_corners'])
             cam2_corners = (data['cam2_real_corners'], data['cam2_img_corners'])
-            self.H1, self.H2, self.court_corners_3d = setup_court_transformation(
+            self.court_corners_3d = setup_court_transformation(
                 cam1_corners, cam2_corners
             )
         
         # Initialize triangulator with both camera parameters
         self.triangulator = Triangulator(
-            self.P1, self.P2, self.cam1_params, self.cam2_params, self.H1, self.H2
+            self.P1, self.P2, self.cam1_params, self.cam2_params
         )
     
     def run_tracking(self, output_3d: Optional[str] = None) -> Tuple[Dict, Dict]:
@@ -251,7 +249,7 @@ def main():
     
     # Initialize and run tracker
     tracker = StereoTracker(data, args.fps)
-    tracking_3d_results, metrics = tracker.run_tracking(args.output_3d)
+    tracker.run_tracking(args.output_3d)
     
     print("\nTracking complete!")
     print(f"Results saved to: {OUTPUT_DIR}")

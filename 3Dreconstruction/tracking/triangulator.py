@@ -2,7 +2,7 @@
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional, Dict, List
+from typing import Dict
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,9 +15,7 @@ class Triangulator:
     """Handles 3D triangulation and coordinate transformations."""
     
     def __init__(self, P1: np.ndarray, P2: np.ndarray, 
-                 cam1_params: dict, cam2_params: dict,
-                 H1: Optional[np.ndarray] = None, 
-                 H2: Optional[np.ndarray] = None):
+                 cam1_params: dict, cam2_params: dict):
         """
         Initialize triangulator with projection matrices and homographies.
         
@@ -33,8 +31,6 @@ class Triangulator:
         self.P2 = P2
         self.cam1_params = cam1_params
         self.cam2_params = cam2_params
-        self.H1 = H1
-        self.H2 = H2
         self.first_ball_height = None  # Will be set during scaling
         self.ball_height_scale = None  # Will be computed after cleaning
         self.ball_height_offset = None  # Will be computed after cleaning
@@ -63,18 +59,11 @@ class Triangulator:
         
         # Convert from homogeneous to 3D coordinates
         points_3d_camera = points_4d[:3] / points_4d[3]
-        
-        # Transform to court coordinates if homographies available
-        #if self.H1 is not None and self.H2 is not None and obj_name is not 'Ball':
-        #    points_3d = self._transform_to_court_coords(
-        #        pt1, pt2, points_3d_camera, obj_name
-        #    )
-        #    return points_3d
-            
         if obj_name == 'Ball':
             # No court transformation, return camera coordinates
             points_3d = points_3d_camera.flatten()
             points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
+            
         else:
             points_3d = points_3d_camera.flatten()
             points_3d[1], points_3d[2] = points_3d[2], points_3d[1]
@@ -184,38 +173,6 @@ class Triangulator:
         
         return scaled_results
     
-    def _transform_to_court_coords(self, pt1: list, pt2: list, 
-                                   points_3d_camera: np.ndarray, 
-                                   obj_name: str) -> np.ndarray:
-        """
-        Transform 3D point from camera coordinates to court coordinates.
-        
-        Args:
-            pt1: 2D point in camera 1
-            pt2: 2D point in camera 2
-            points_3d_camera: 3D point in camera coordinates
-            obj_name: Object name for special handling
-            
-        Returns:
-            3D point in court coordinates [X, Y, Z]
-        """
-        # Transform each camera's point to court coordinates
-        pt1_court = cv2.perspectiveTransform(
-            np.array([[pt1]], dtype=np.float32), self.H1
-        )[0, 0]
-        pt2_court = cv2.perspectiveTransform(
-            np.array([[pt2]], dtype=np.float32), self.H2
-        )[0, 0]
-        
-        # Average the court positions from both views
-        court_xy = (pt1_court + pt2_court) / 2
-        
-        # Get height from triangulated point using both cameras
-        
-        y_coord = 0.0  # Players on the ground
-        
-        # Create final position: X, Y (height), Z (depth)
-        return np.array([court_xy[0], y_coord, court_xy[1]])
     
     def _extract_height_stereo(self, points_3d_camera: np.ndarray, 
                                pt1: list, pt2: list) -> float:
