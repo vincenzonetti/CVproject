@@ -118,7 +118,7 @@ def add_player_trajectories(fig: go.Figure, trajectories: Dict,
         # Create hover text
         hover_text = create_hover_text(obj_name, frames, positions, metrics)
         
-        # Add main trajectory
+        # Add main trajectory - NOW VISIBLE BY DEFAULT
         fig.add_trace(go.Scatter3d(
             x=positions[:, 0],  # X (width)
             y=positions[:, 1],  # Y (height)
@@ -130,10 +130,10 @@ def add_player_trajectories(fig: go.Figure, trajectories: Dict,
             text=hover_text,
             hoverinfo='text',
             legendgroup=f'player{obj_name}',
-            visible=False  # Start with all players hidden
+            visible=True  # CHANGED: Start with all players visible
         ))
         
-        # Add start marker
+        # Add start marker - ALSO VISIBLE BY DEFAULT
         fig.add_trace(go.Scatter3d(
             x=[positions[0, 0]],
             y=[positions[0, 1]],
@@ -144,10 +144,10 @@ def add_player_trajectories(fig: go.Figure, trajectories: Dict,
                        symbol='circle'),
             showlegend=False,
             legendgroup=f'player{obj_name}',
-            visible=False
+            visible=True  # CHANGED: Start marker visible by default
         ))
         
-        # Add end marker
+        # Add end marker - ALSO VISIBLE BY DEFAULT
         fig.add_trace(go.Scatter3d(
             x=[positions[-1, 0]],
             y=[positions[-1, 1]],
@@ -158,7 +158,7 @@ def add_player_trajectories(fig: go.Figure, trajectories: Dict,
                        symbol='square'),
             showlegend=False,
             legendgroup=f'player{obj_name}',
-            visible=False
+            visible=True  # CHANGED: End marker visible by default
         ))
         
         player_traces_added.append(obj_name)
@@ -178,8 +178,15 @@ def create_hover_text(obj_name: str, frames: List[int],
         text += f"{positions[j, 2]:.2f}) m<br>"
         
         if obj_name in metrics:
-            text += f"Avg Speed: {metrics[obj_name]['avg_ground_speed_ms']:.2f} m/s<br>"
-            text += f"Total Distance: {metrics[obj_name]['total_ground_distance_m']:.2f} m"
+            # Show 3D metrics for ball, 2D for players
+            movement_type = metrics[obj_name].get('movement_type', '2D')
+            if obj_name == 'Ball' and movement_type == '3D':
+                text += f"Avg 3D Speed: {metrics[obj_name].get('avg_3d_speed_ms', 0):.2f} m/s<br>"
+                text += f"Max 3D Speed: {metrics[obj_name].get('max_3d_speed_ms', 0):.2f} m/s<br>"
+                text += f"3D Distance: {metrics[obj_name].get('total_3d_movement_distance_m', 0):.2f} m"
+            else:
+                text += f"Avg Ground Speed: {metrics[obj_name]['avg_ground_speed_ms']:.2f} m/s<br>"
+                text += f"Total Ground Distance: {metrics[obj_name]['total_ground_distance_m']:.2f} m"
         
         hover_text.append(text)
     
@@ -191,7 +198,7 @@ def configure_3d_layout(fig: go.Figure, num_court_traces: int) -> None:
     fig.update_layout(
         title={
             'text': 'Basketball Player 3D Trajectories<br>'
-                    '<sub>Click on player names to show/hide trajectories</sub>',
+                    '<sub>Click on player names to hide/show trajectories</sub>',
             'x': 0.5,
             'xanchor': 'center'
         },
@@ -231,7 +238,7 @@ def configure_3d_layout(fig: go.Figure, num_court_traces: int) -> None:
             x=1.02,
             y=0.5,
             yanchor='middle',
-            title=dict(text='Players (click to show/hide)')
+            title=dict(text='Players (click to hide/show)')
         ),
         width=1200,
         height=800
@@ -240,6 +247,7 @@ def configure_3d_layout(fig: go.Figure, num_court_traces: int) -> None:
     # Add show/hide all buttons
     add_visibility_controls(fig, num_court_traces)
     
+
 def add_visibility_controls(fig: go.Figure, num_court_traces: int) -> None:
     """
     Adds 'Show All' and 'Hide All' buttons to the figure layout.
@@ -257,7 +265,7 @@ def add_visibility_controls(fig: go.Figure, num_court_traces: int) -> None:
         label='Show All Players',
         method='update',
         args=[{'visible': [True] * num_court_traces + [True] * num_player_traces},
-              {'title.text': '<b>Basketball Player 3D Trajectories</b><br><sub>Showing all player trajectories</sub>'}]
+              {'title.text': '<b>Basketball Player 3D Trajectories</b><br><sub>All players visible - click names to hide individual trajectories</sub>'}]
     )
 
     # Create the 'Hide All' button configuration
@@ -265,7 +273,7 @@ def add_visibility_controls(fig: go.Figure, num_court_traces: int) -> None:
         label='Hide All Players',
         method='update',
         args=[{'visible': [True] * num_court_traces + [False] * num_player_traces},
-             {'title.text': '<b>Basketball Player 3D Trajectories</b><br><sub>Click on player names in the legend to toggle individual trajectories</sub>'}]
+             {'title.text': '<b>Basketball Player 3D Trajectories</b><br><sub>All players hidden - click "Show All" or individual names to display trajectories</sub>'}]
     )
 
     # Update the figure's layout with the new buttons
