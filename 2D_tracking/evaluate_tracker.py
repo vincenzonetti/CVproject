@@ -10,11 +10,12 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate detections (not tracking) on every 5th frame")
     parser.add_argument('--results', type=str, required=True, help='Path to tracking_results.json')
     parser.add_argument('--video_name', type=str, required=True, help='Name of the video file (without extension)')
+    parser.add_argument('--label_dir', type=str, required=True, help='name of the directory of which contains the lables of the video')
 
     args = parser.parse_args()
 
     # Constants
-    LABEL_DIR = 'data/frames_annotated_yolov8/train/labels'
+    LABEL_DIR = args.label_dir
     NUM_FRAMES = 600
     FRAME_INTERVAL = 5
     IOU_THRESHOLD = 0.5
