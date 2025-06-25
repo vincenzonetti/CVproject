@@ -181,4 +181,9 @@ cython_debug/
 .pypirc
 outputs/
 rectified_videos/
-rectified_videos2/
+rectified_videos2/.vscode/settings.json
+outputs/
+
+data/
+demo/
+test.ipynb
