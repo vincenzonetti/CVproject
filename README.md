@@ -234,7 +234,7 @@ The `other_files/` folder contains experimental tracking methods that were devel
 ### 8. `extract_histograms_from_annotations.py`
 - Extracts histogram distribution of the ball from annotated frames
 
-**Note**: Despite extensive experimentation with these approaches, none achieved satisfactory ball tracking results. The final solution adopted the two-model approach in the `2D_tracking/` folder, using a specialized ball detection model trained through fine-tuning on a basketball-specific dataset.
+**Note**: Despite extensive experimentation with these approaches, none achieved satisfactory ball tracking results. The final solution adopted the two-model approach in the `2D_tracking/` folder, using a specialized ball detection model trained through fine-tuning on a basketball-specific augmented dataset.
 
 ## Output Files
 
