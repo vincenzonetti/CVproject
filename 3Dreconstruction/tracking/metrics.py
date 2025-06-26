@@ -18,7 +18,7 @@ SPEED_OUTLIER_STD_THRESHOLD = 2.0  # Standard deviations for speed outlier detec
 ACCELERATION_OUTLIER_STD_THRESHOLD = 2.0  # Standard deviations for acceleration outlier detection
 MIN_SPEED_SAMPLES = 5  # Minimum samples needed for outlier detection
 MAX_REASONABLE_SPEED_MS = 12.0  # Maximum reasonable speed for basketball players (m/s)
-MAX_REASONABLE_ACCELERATION_MS2 = 8.0  # Maximum reasonable acceleration (m/s²) - reduced from 15.0
+MAX_REASONABLE_ACCELERATION_MS2 = 4.0  # Maximum reasonable acceleration (m/s²) - reduced from 15.0
 
 
 def extract_trajectories(tracking_3d_results: Dict) -> Dict[str, Dict]:

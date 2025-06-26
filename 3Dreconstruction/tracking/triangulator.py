@@ -160,7 +160,7 @@ class Triangulator:
                     scaled_height = np.clip(scaled_height, 0.0, BALL_MAX_HEIGHT_M)
                     position[1] = scaled_height
                     position[0]/=1000
-                    position[2]/=1100
+                    position[2]/=1000
                     # Store updated data
                     
                     scaled_results[frame_key][obj_name] = {
