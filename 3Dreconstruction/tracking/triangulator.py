@@ -172,48 +172,6 @@ class Triangulator:
                     scaled_results[frame_key][obj_name] = obj_data
         
         return scaled_results
-    
-    
-    def _extract_height_stereo(self, points_3d_camera: np.ndarray, 
-                               pt1: list, pt2: list) -> float:
-        """
-        Extract height from camera coordinates using stereo information.
-        
-        Args:
-            points_3d_camera: 3D point in camera coordinates
-            pt1: 2D point from camera 1
-            pt2: 2D point from camera 2
-            
-        Returns:
-            Height value in meters
-        """
-        # Use both camera parameters for better height estimation
-        R1, _ = cv2.Rodrigues(self.cam1_params['rvecs'])
-        t1 = self.cam1_params['tvecs'].reshape(-1, 1)
-        
-        R2, _ = cv2.Rodrigues(self.cam2_params['rvecs'])
-        t2 = self.cam2_params['tvecs'].reshape(-1, 1)
-        
-        # Transform to world coordinates using camera 1
-        points_3d_world1 = R1.T @ (points_3d_camera - t1)
-        
-        # Also compute using camera 2 for comparison
-        points_3d_cam2 = R2 @ points_3d_world1 + t2
-        points_3d_world2 = R2.T @ (points_3d_cam2 - t2)
-        
-        # Average the height estimates from both cameras
-        z_world1 = points_3d_world1[2, 0]
-        z_world2 = points_3d_world2[2, 0]
-        z_world = (z_world1 + z_world2) / 2
-        
-        # Scale if necessary
-        
-        if abs(z_world) > MAX_REASONABLE_HEIGHT_M:
-            z_world *= HEIGHT_SCALE_FACTOR
-            z_world/=4
-        
-        return z_world
-
 
 def compute_projection_matrix(cam_params: dict) -> np.ndarray:
     """
