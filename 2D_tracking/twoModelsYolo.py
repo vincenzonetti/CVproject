@@ -20,10 +20,15 @@ colors = [
     (165, 42, 42),  # Brown
     (0, 0, 0),      # Black
     (255, 255, 255),# White
-    (128, 128, 128),# Gray
+    (191, 8, 115),   # Light magenta
     (0, 128, 0)     # Dark Green
 ]
 
+CLASSES = [
+    'Ball', 'Red_0', 'Red_11', 'Red_12', 'Red_16', 'Red_2', 
+    'Refree_F', 'Refree_M', 'White_13', 'White_16', 'White_25', 
+    'White_27', 'White_34'
+]
 
 def run_tracker(model_path_players: str,model_path_ball: str, video_path: str):
     model_player = YOLO(model_path_players)
@@ -116,8 +121,8 @@ def run_tracker(model_path_players: str,model_path_ball: str, video_path: str):
             y1 = int((yc - bh / 2) * img_h)
             x2 = int((xc + bw / 2) * img_w)
             y2 = int((yc + bh / 2) * img_h)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), colors[id], 2)
-            cv2.putText(frame, f"ID {det['track_id']}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, colors[id], 1)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), colors[id], thickness=4)
+            cv2.putText(frame, f"{CLASSES[id]}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, colors[id], 2)
         
         frame_key = f"{video_name}_{frame_idx}"
         tracking_results[frame_key] = detections
