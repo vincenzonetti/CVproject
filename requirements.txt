@@ -1,0 +1,9 @@
+opencv-python
+ultralytics
+numpy
+scipy
+plotly
+pandas
+tqdm
+matplotlib
+scikit-learn
